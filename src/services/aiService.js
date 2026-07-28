@@ -2,7 +2,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // Importe suas stores do Zustand
 import { useFitnessStore } from '../store/useFitnessStore';
 import { useFinanceStore } from '../store/useFinanceStore';
-// NOVO: Importe a store da Agenda (Ajuste o caminho/nome se precisar)
 import { useAgendaStore } from '../store/useAgendaStore'; 
 
 // Inicializa a IA com a sua chave
@@ -13,7 +12,7 @@ const AcoesDoSistema = {
   registrar_peso: (args) => {
     // Acessa a função da store diretamente
     useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', args.peso, 'kg');
-    return `⚖️ Peso de ${args.peso}kg atualizado com sucesso!`;
+    return `⚖️ Peso de ${args.peso}kg atualizado com sucesso, senhor.`;
   },
   
   adicionar_despesa: (args) => {
@@ -29,10 +28,9 @@ const AcoesDoSistema = {
       status: 'pago' 
     });
 
-    return `💸 Despesa de R$ ${args.valor} (${args.descricao}) registrada!`;
+    return `💸 Despesa de R$ ${args.valor} (${args.descricao}) registrada. O banco de dados foi atualizado.`;
   },
 
-  // NOVO: Ação para lidar com a Agenda
   adicionar_agenda: (args) => {
     const { addAgendaItem } = useAgendaStore.getState(); 
 
@@ -44,37 +42,41 @@ const AcoesDoSistema = {
       // Se houver hora, adiciona os segundos (HH:MM:00) para evitar problemas no tipo time do banco
       time: args.hora ? `${args.hora}:00` : null, 
       category: args.categoria || 'Geral'
-      // id, user_id, created_at, e is_completed são definidos pelo banco
     });
 
     const msgHora = args.hora ? ` às ${args.hora}` : '';
     // Invertendo a data de YYYY-MM-DD para DD/MM/YYYY só para a mensagem visual ficar mais amigável
     const dataFormatada = args.data.split('-').reverse().join('/');
     
-    return `📅 "${args.titulo}" anotado para ${dataFormatada}${msgHora}!`;
+    return `📅 Entendido, senhor. "${args.titulo}" foi adicionado aos seus compromissos para ${dataFormatada}${msgHora}.`;
   },
   
   iniciar_pomodoro: (args) => {
     // Lógica para iniciar seu timer (quando você tiver a store do Pomodoro)
-    return `🍅 Pomodoro de ${args.minutos} minutos ativado. Foco total!`;
+    return `🍅 Pomodoro de ${args.minutos} minutos ativado. Modo de foco iniciado.`;
+  },
+
+  // NOVO: Função para o Bastian bater papo e responder perguntas normais
+  conversar: (args) => {
+    return args.resposta; 
   }
 };
 
 export async function enviarComandoParaIA(comandoTexto) {
   try {
-    // Usando o modelo super rápido e recente
     const model = genAI.getGenerativeModel({ 
       model: "gemini-flash-latest",
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    // Pega a data local de hoje no formato YYYY-MM-DD para dar contexto à IA
-    // Assim, quando você disser "amanhã", ela sabe calcular a data exata!
-    const dataAtual = new Date().toLocaleDateString('en-CA'); 
+    const dataAtual = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+    const dataFormatadaPT = new Date().toLocaleDateString('pt-BR');
 
     const prompt = `
-      Você é a IA assistente do "Centro de Comando".
-      Hoje é dia ${dataAtual}.
+      Você é "Bastian", a IA assistente pessoal avançada do "Centro de Comando" (inspirado no J.A.R.V.I.S).
+      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente eficiente, um pouco sarcástica, e você sempre se refere a ele como "senhor Yuri" ou apenas "senhor".
+      Hoje é dia ${dataFormatadaPT} (Formato sistema: ${dataAtual}).
+      
       O usuário vai te dar um comando em linguagem natural.
       Sua tarefa é extrair a intenção e retornar APENAS um JSON estrito no seguinte formato:
       
@@ -83,17 +85,25 @@ export async function enviarComandoParaIA(comandoTexto) {
         "argumentos": { ... }
       }
 
+      Regra importante:
+      Se o usuário pedir para registrar despesa, peso, agenda ou pomodoro, use a função correspondente.
+      Se o usuário fizer uma pergunta genérica, disser "olá", testar o microfone, ou quiser apenas bater papo, USE A FUNÇÃO "conversar" e crie uma resposta verbal curta, direta e com a sua personalidade J.A.R.V.I.S.
+
       Funções disponíveis:
       1. "registrar_peso" -> argumentos: "peso" (número)
       2. "adicionar_despesa" -> argumentos: "valor" (número), "descricao" (string), "categoria" (string)
       3. "iniciar_pomodoro" -> argumentos: "minutos" (número)
-      4. "adicionar_agenda" -> argumentos: "titulo" (string), "descricao" (string), "data" (string no formato YYYY-MM-DD baseada no dia de hoje), "hora" (string no formato HH:MM ou null se não especificado), "categoria" (string)
+      4. "adicionar_agenda" -> argumentos: "titulo" (string), "descricao" (string), "data" (string no formato YYYY-MM-DD baseada no dia de hoje), "hora" (string no formato HH:MM ou null), "categoria" (string)
+      5. "conversar" -> argumentos: "resposta" (string com a sua resposta conversada)
 
       Comando do usuário: "${comandoTexto}"
     `;
 
     const result = await model.generateContent(prompt);
-    const respostaTexto = result.response.text();
+    let respostaTexto = result.response.text();
+    
+    // CORREÇÃO DE BUG: Remove blocos de markdown que o Gemini às vezes envia e quebram o código
+    respostaTexto = respostaTexto.replace(/```json/g, '').replace(/```/g, '').trim();
     
     // Converte a string JSON da IA em um objeto JavaScript
     const comandoEstruturado = JSON.parse(respostaTexto);
@@ -103,11 +113,11 @@ export async function enviarComandoParaIA(comandoTexto) {
       const mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos);
       return { sucesso: true, mensagem: mensagemRetorno };
     } else {
-      return { sucesso: false, mensagem: "Entendi o comando, mas ainda não sei executar essa ação." };
+      return { sucesso: false, mensagem: "Desculpe, senhor. Reconheci o comando, mas meus protocolos não possuem essa função." };
     }
 
   } catch (error) {
     console.error("Erro na IA:", error);
-    return { sucesso: false, mensagem: "Falha ao processar o comando com a IA." };
+    return { sucesso: false, mensagem: "Houve uma falha na minha rede neural ao processar o seu pedido, senhor." };
   }
 }

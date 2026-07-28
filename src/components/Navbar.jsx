@@ -1,5 +1,5 @@
 import React from 'react';
-import { Target, Dumbbell, Command, User, LogOut, Wallet, LayoutDashboard } from 'lucide-react';
+import { Target, Dumbbell, Command, User, LogOut, Wallet, LayoutDashboard, Bot } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore'; // Para podermos fazer o logout
 
@@ -23,9 +23,21 @@ export default function Navbar() {
           </Link>
 
           {/* 2. NAVEGAÇÃO CENTRAL (Usando rotas) */}
-          <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700/50 shadow-inner">
+          <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700/50 shadow-inner overflow-x-auto">
             
-            {/* Nova aba Dashboard */}
+            {/* NOVO: Aba Bastian agora é a primeira */}
+            <Link 
+              to="/bastian"
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ${
+                location.pathname === '/bastian'
+                  ? 'bg-slate-800 text-cyan-400 shadow-sm' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Bot className="w-4 h-4 shrink-0" /> 
+              <span className="hidden sm:inline">Bastian</span>
+            </Link>
+
             <Link 
               to="/"
               className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ${
@@ -34,7 +46,7 @@ export default function Navbar() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <LayoutDashboard className="w-4 h-4" /> 
+              <LayoutDashboard className="w-4 h-4 shrink-0" /> 
               <span className="hidden sm:inline">Dashboard</span>
             </Link>
 
@@ -46,7 +58,7 @@ export default function Navbar() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <Wallet className="w-4 h-4" /> 
+              <Wallet className="w-4 h-4 shrink-0" /> 
               <span className="hidden sm:inline">Financeiro</span>
             </Link>
 
@@ -58,7 +70,7 @@ export default function Navbar() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <Target className="w-4 h-4" /> 
+              <Target className="w-4 h-4 shrink-0" /> 
               <span className="hidden sm:inline">Agenda</span>
             </Link>
             
@@ -70,7 +82,7 @@ export default function Navbar() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <Dumbbell className="w-4 h-4" /> 
+              <Dumbbell className="w-4 h-4 shrink-0" /> 
               <span className="hidden sm:inline">Treino</span>
             </Link>
 

@@ -58,7 +58,58 @@ export const useAgendaStore = create((set, get) => ({
     }
   },
 
-  // 3. MARCAR COMO CONCLUÍDO/PENDENTE
+  // 3. ATUALIZAR ITEM EXISTENTE (Editar)
+  updateAgendaItem: async (id, updatedItem) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      const { data, error } = await supabase
+        .from('agenda_items')
+        .update(updatedItem)
+        .eq('id', id)
+        .select();
+
+      if (error) throw error;
+
+      // Atualiza o item específico na lista local para refletir na UI instantaneamente
+      set((state) => ({
+        agendaItems: state.agendaItems.map((item) =>
+          item.id === id ? { ...item, ...data[0] } : item
+        ),
+      }));
+    } catch (error) {
+      set({ error: error.message });
+      console.error('Erro ao atualizar item:', error);
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  // 4. DELETAR ITEM DA AGENDA (Excluir)
+  deleteAgendaItem: async (id) => {
+    set({ isLoading: true, error: null });
+    
+    try {
+      const { error } = await supabase
+        .from('agenda_items')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Remove o item da lista local
+      set((state) => ({
+        agendaItems: state.agendaItems.filter((item) => item.id !== id),
+      }));
+    } catch (error) {
+      set({ error: error.message });
+      console.error('Erro ao deletar item:', error);
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  // 5. MARCAR COMO CONCLUÍDO/PENDENTE
   toggleItemCompletion: async (id, currentStatus) => {
     try {
       const { error } = await supabase

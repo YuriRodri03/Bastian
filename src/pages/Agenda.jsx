@@ -5,13 +5,14 @@ import { useKanbanStore } from '../store/useKanbanStore';
 import { useInboxStore } from '../store/useInboxStore';
 import { 
   Calendar as CalendarIcon, CheckSquare, Target, Plus, 
-  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock, Eye 
+  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock, Eye, Edit2
 } from 'lucide-react'; 
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function Agenda() {
-  const { agendaItems, addAgendaItem, fetchAgendaItems, isLoading: agendaLoading } = useAgendaStore();
+  // ADICIONADO: updateAgendaItem e deleteAgendaItem extraídos da store
+  const { agendaItems, addAgendaItem, updateAgendaItem, deleteAgendaItem, fetchAgendaItems, isLoading: agendaLoading } = useAgendaStore();
   const { transactions, fetchTransactions } = useFinanceStore();
   
   const { tasks: kanbanTasks, moveTask, fetchKanbanTasks, deleteTask: deleteKanbanTask } = useKanbanStore();
@@ -24,10 +25,11 @@ export default function Agenda() {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ title: '', date: '', time: '', category: 'evento' });
+  
+  // NOVO: Estado para saber se estamos editando um evento existente (guarda o ID dele)
+  const [editingId, setEditingId] = useState(null);
 
-  // NOVO: Estado para controlar o modal de visualização detalhada do dia clicado
   const [selectedDayModal, setSelectedDayModal] = useState({ isOpen: false, date: null });
-
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // Navegação do calendário
@@ -83,10 +85,41 @@ export default function Agenda() {
     fetchInboxTasks();
   }, [fetchAgendaItems, fetchTransactions, fetchKanbanTasks, fetchInboxTasks]);
 
+  // NOVO: Lógica de Salvamento ajustada para criar ou editar
   const handleAddSubmit = async (e) => {
     e.preventDefault();
-    await addAgendaItem(newItem);
+    if (editingId && updateAgendaItem) {
+      await updateAgendaItem(editingId, newItem);
+    } else {
+      await addAgendaItem(newItem);
+    }
+    fecharModalFormulario();
+  };
+
+  // NOVO: Função para preencher os dados no formulário e abrir modo edição
+  const handleEditClick = (evento) => {
+    setEditingId(evento.id);
+    setNewItem({
+      title: evento.title,
+      date: evento.date,
+      time: evento.time ? evento.time.substring(0, 5) : '',
+      category: evento.category || 'evento'
+    });
+    setSelectedDayModal({ isOpen: false, date: null }); // Fecha o resumo do dia
+    setIsModalOpen(true); // Abre o formulário
+  };
+
+  // NOVO: Função para deletar
+  const handleDeleteClick = async (id) => {
+    if (window.confirm('Tem certeza que deseja excluir este compromisso?')) {
+      if (deleteAgendaItem) await deleteAgendaItem(id);
+    }
+  };
+
+  // Auxiliar para resetar o form ao fechar
+  const fecharModalFormulario = () => {
     setIsModalOpen(false);
+    setEditingId(null);
     setNewItem({ title: '', date: '', time: '', category: 'evento' });
   };
 
@@ -175,7 +208,6 @@ export default function Agenda() {
                   <div 
                     key={index} 
                     onClick={() => {
-                      // Se estiver no modo mensal, ao clicar na célula abrimos o modal detalhado do dia
                       if (calendarMode === 'month') {
                         setSelectedDayModal({ isOpen: true, date: diaAtual });
                       }
@@ -191,7 +223,6 @@ export default function Agenda() {
                       </span>
                       {calendarMode === 'day' && <span className="text-slate-400 text-sm capitalize">{format(diaAtual, 'EEEE', { locale: ptBR })}</span>}
                       
-                      {/* Indicador discreto de quantidade se houver muitos itens no mês */}
                       {calendarMode === 'month' && totalItens > 2 && (
                         <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded">
                           +{totalItens - 2}
@@ -200,7 +231,6 @@ export default function Agenda() {
                     </div>
                     
                     <div className="flex flex-col gap-1.5 overflow-hidden flex-1">
-                      {/* Transações Financeiras (Mostra no máximo 2 para não estourar) */}
                       {transacoesDoDia.slice(0, calendarMode === 'month' ? 2 : transacoesDoDia.length).map(transacao => {
                         const isDespesa = transacao.type === 'despesa';
                         return (
@@ -214,7 +244,6 @@ export default function Agenda() {
                         );
                       })}
 
-                      {/* Eventos da Agenda (Mostra no máximo 2 no mês) */}
                       {eventosDoDia.slice(0, calendarMode === 'month' ? 2 : eventosDoDia.length).map(evento => (
                         <div key={`ev-${evento.id}`} className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] rounded-lg truncate flex items-center gap-1" title={evento.title}>
                           {evento.time && <span className="opacity-70 font-mono tracking-wider text-[9px] shrink-0">{evento.time.substring(0,5)}</span>}
@@ -223,7 +252,6 @@ export default function Agenda() {
                       ))}
                     </div>
 
-                    {/* Botão sutil de ver mais ao passar o mouse no modo mês */}
                     {calendarMode === 'month' && totalItens > 0 && (
                       <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
                         <span className="text-[11px] font-medium text-cyan-300 flex items-center gap-1 bg-cyan-950/80 border border-cyan-500/40 px-2 py-1 rounded-md shadow">
@@ -349,7 +377,7 @@ export default function Agenda() {
         )}
       </main>
 
-      {/* ================= NOVO: MODAL DE DETALHES DO DIA SELECIONADO ================= */}
+      {/* ================= MODAL DE DETALHES DO DIA SELECIONADO ================= */}
       {selectedDayModal.isOpen && selectedDayModal.date && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-white/10 p-6 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
@@ -379,16 +407,39 @@ export default function Agenda() {
                 ) : (
                   <div className="space-y-2">
                     {agendaItems?.filter(i => i.date === format(selectedDayModal.date, 'yyyy-MM-dd')).map(evento => (
-                      <div key={evento.id} className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl flex flex-col gap-1">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-slate-200">{evento.title}</span>
-                          {evento.time && (
-                            <span className="text-xs font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded flex items-center gap-1">
-                              <Clock size={10} /> {evento.time.substring(0,5)}
-                            </span>
-                          )}
+                      
+                      // NOVO: Design dos cartões de evento atualizado com botões de Editar e Excluir
+                      <div key={evento.id} className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl flex flex-col gap-2">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-sm font-medium text-slate-200 block">{evento.title}</span>
+                            {evento.category && <span className="text-[10px] text-slate-400 uppercase">Categoria: {evento.category}</span>}
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {evento.time && (
+                              <span className="text-xs font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded flex items-center gap-1 mr-2">
+                                <Clock size={10} /> {evento.time.substring(0,5)}
+                              </span>
+                            )}
+                            {/* Botão Editar */}
+                            <button 
+                              onClick={() => handleEditClick(evento)} 
+                              className="p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/20 rounded-lg transition-colors"
+                              title="Editar Evento"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            {/* Botão Excluir */}
+                            <button 
+                              onClick={() => handleDeleteClick(evento.id)} 
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-colors"
+                              title="Excluir Evento"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
-                        {evento.category && <span className="text-[10px] text-slate-400 uppercase">Categoria: {evento.category}</span>}
                       </div>
                     ))}
                   </div>
@@ -428,7 +479,6 @@ export default function Agenda() {
             <div className="mt-4 pt-3 border-t border-white/10 flex justify-end">
               <button 
                 onClick={() => {
-                  // Atalho para ir direto para a visualização diária desse dia exato
                   setCurrentDate(selectedDayModal.date);
                   setCalendarMode('day');
                   setSelectedDayModal({ isOpen: false, date: null });
@@ -442,13 +492,16 @@ export default function Agenda() {
         </div>
       )}
 
-      {/* ================= MODAL DE ADICIONAR ================= */}
+      {/* ================= MODAL DE FORMULÁRIO (CRIAR E EDITAR) ================= */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-white/10 p-6 rounded-2xl w-full max-w-md shadow-2xl">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-sm font-semibold text-slate-300">Novo Evento</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200"><X size={18} /></button>
+              {/* Título dinâmico dependendo do estado editingId */}
+              <h3 className="text-sm font-semibold text-slate-300">
+                {editingId ? 'Editar Evento' : 'Novo Evento'}
+              </h3>
+              <button onClick={fecharModalFormulario} className="text-slate-400 hover:text-slate-200"><X size={18} /></button>
             </div>
             
             <form onSubmit={handleAddSubmit} className="space-y-4">
@@ -475,7 +528,7 @@ export default function Agenda() {
                 </select>
               </div>
               <button type="submit" disabled={agendaLoading} className="w-full bg-cyan-600/90 hover:bg-cyan-500 text-white font-medium text-sm p-3 rounded-xl mt-4 shadow-lg shadow-cyan-500/25 transition-all">
-                {agendaLoading ? 'Salvando...' : 'Salvar no Calendário'}
+                {agendaLoading ? (editingId ? 'Atualizando...' : 'Salvando...') : (editingId ? 'Atualizar Evento' : 'Salvar no Calendário')}
               </button>
             </form>
           </div>

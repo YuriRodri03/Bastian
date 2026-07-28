@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 
 // imports das páginas
 import Login from './pages/Login';
+import Bastian from './pages/Bastian';
 import Dashboard from './pages/Dashboard'; 
 import Financeiro from './pages/Financeiro';
 import Agenda from './pages/Agenda';
@@ -113,6 +114,9 @@ function App() {
       {/* Adicionado pb-24 aqui para o conteúdo não ficar escondido atrás da barra da IA */}
       <main className="bg-slate-950 min-h-screen text-slate-100 pb-24">
         <Routes>
+          {/* Rota do Bastian */}
+          <Route path="/bastian" element={<Bastian />} />
+
           {/* Rota principal com o Dashboard integrado */}
           <Route path="/" element={<Dashboard />} />
           
