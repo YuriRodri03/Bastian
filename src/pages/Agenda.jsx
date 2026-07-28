@@ -5,7 +5,7 @@ import { useKanbanStore } from '../store/useKanbanStore';
 import { useInboxStore } from '../store/useInboxStore';
 import { 
   Calendar as CalendarIcon, CheckSquare, Target, Plus, 
-  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock 
+  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock, Eye 
 } from 'lucide-react'; 
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -24,6 +24,9 @@ export default function Agenda() {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ title: '', date: '', time: '', category: 'evento' });
+
+  // NOVO: Estado para controlar o modal de visualização detalhada do dia clicado
+  const [selectedDayModal, setSelectedDayModal] = useState({ isOpen: false, date: null });
 
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -90,7 +93,7 @@ export default function Agenda() {
   return (
     <div className="min-h-screen p-8 font-sans flex flex-col items-center">
       
-      {/* CABEÇALHO PADRÃO GLASSMORPHISM (Igual ao Financeiro) */}
+      {/* CABEÇALHO PADRÃO GLASSMORPHISM */}
       <div className="w-full max-w-6xl mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-white/5 rounded-xl border border-white/10 backdrop-blur-md">
@@ -102,7 +105,7 @@ export default function Agenda() {
           </div>
         </div>
 
-        {/* Menu de Abas (Estilo Filtro do Financeiro) */}
+        {/* Menu de Abas */}
         <div className="flex items-center gap-2 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-md shadow-lg overflow-x-auto">
           <button onClick={() => setActiveTab('calendar')} className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'calendar' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'text-slate-400 hover:text-slate-200 border border-transparent'}`}>
             <CalendarIcon size={16} /> <span className="hidden sm:inline">Calendário</span>
@@ -165,25 +168,43 @@ export default function Agenda() {
                 
                 const eventosDoDia = agendaItems?.filter(item => item.date === dataString) || [];
                 const transacoesDoDia = transactions?.filter(t => t.date === dataString) || [];
+                
+                const totalItens = eventosDoDia.length + transacoesDoDia.length;
 
                 return (
-                  <div key={index} className={`p-3 border-b border-r border-white/5 hover:bg-white/5 transition-colors group 
-                    ${isCurrentMonth || calendarMode !== 'month' ? 'bg-transparent' : 'bg-black/40'}
-                    ${calendarMode === 'month' ? 'min-h-[120px]' : 'min-h-[400px]'} 
-                  `}>
-                    <div className="flex items-center gap-2 mb-3">
+                  <div 
+                    key={index} 
+                    onClick={() => {
+                      // Se estiver no modo mensal, ao clicar na célula abrimos o modal detalhado do dia
+                      if (calendarMode === 'month') {
+                        setSelectedDayModal({ isOpen: true, date: diaAtual });
+                      }
+                    }}
+                    className={`p-3 border-b border-r border-white/5 hover:bg-white/5 transition-colors group cursor-pointer relative flex flex-col
+                      ${isCurrentMonth || calendarMode !== 'month' ? 'bg-transparent' : 'bg-black/40'}
+                      ${calendarMode === 'month' ? 'min-h-[120px]' : 'min-h-[400px]'} 
+                    `}
+                  >
+                    <div className="flex items-center justify-between mb-2">
                       <span className={`text-xs font-semibold w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : isCurrentMonth || calendarMode !== 'month' ? 'text-slate-300' : 'text-slate-600'}`}>
                         {format(diaAtual, 'd')}
                       </span>
                       {calendarMode === 'day' && <span className="text-slate-400 text-sm capitalize">{format(diaAtual, 'EEEE', { locale: ptBR })}</span>}
+                      
+                      {/* Indicador discreto de quantidade se houver muitos itens no mês */}
+                      {calendarMode === 'month' && totalItens > 2 && (
+                        <span className="text-[9px] font-mono bg-white/10 text-slate-300 px-1.5 py-0.5 rounded">
+                          +{totalItens - 2}
+                        </span>
+                      )}
                     </div>
                     
-                    <div className="flex flex-col gap-1.5 overflow-y-auto h-full custom-scrollbar pb-6">
-                      {/* Transações Financeiras */}
-                      {transacoesDoDia.map(transacao => {
+                    <div className="flex flex-col gap-1.5 overflow-hidden flex-1">
+                      {/* Transações Financeiras (Mostra no máximo 2 para não estourar) */}
+                      {transacoesDoDia.slice(0, calendarMode === 'month' ? 2 : transacoesDoDia.length).map(transacao => {
                         const isDespesa = transacao.type === 'despesa';
                         return (
-                          <div key={`fin-${transacao.id}`} className={`px-2 py-1.5 text-[10px] rounded-lg border flex justify-between gap-1 items-center
+                          <div key={`fin-${transacao.id}`} className={`px-2 py-1 text-[10px] rounded-lg border flex justify-between gap-1 items-center truncate
                             ${isDespesa ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'}`}
                             title={transacao.description}
                           >
@@ -193,14 +214,23 @@ export default function Agenda() {
                         );
                       })}
 
-                      {/* Eventos da Agenda */}
-                      {eventosDoDia.map(evento => (
-                        <div key={`ev-${evento.id}`} className="px-2 py-1.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] rounded-lg truncate flex flex-col gap-0.5" title={evento.title}>
-                          {evento.time && <span className="opacity-70 font-mono tracking-wider"><Clock size={8} className="inline mr-1 mb-0.5"/>{evento.time.substring(0,5)}</span>}
+                      {/* Eventos da Agenda (Mostra no máximo 2 no mês) */}
+                      {eventosDoDia.slice(0, calendarMode === 'month' ? 2 : eventosDoDia.length).map(evento => (
+                        <div key={`ev-${evento.id}`} className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] rounded-lg truncate flex items-center gap-1" title={evento.title}>
+                          {evento.time && <span className="opacity-70 font-mono tracking-wider text-[9px] shrink-0">{evento.time.substring(0,5)}</span>}
                           <span className="truncate font-medium">{evento.title}</span>
                         </div>
                       ))}
                     </div>
+
+                    {/* Botão sutil de ver mais ao passar o mouse no modo mês */}
+                    {calendarMode === 'month' && totalItens > 0 && (
+                      <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                        <span className="text-[11px] font-medium text-cyan-300 flex items-center gap-1 bg-cyan-950/80 border border-cyan-500/40 px-2 py-1 rounded-md shadow">
+                          <Eye size={12} /> Ver dia ({totalItens})
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -301,7 +331,7 @@ export default function Agenda() {
                           <X size={14} />
                         </button>
                       </div>
-                  ))}
+                    ))}
                 </div>
 
                 <button 
@@ -318,6 +348,99 @@ export default function Agenda() {
           </div>
         )}
       </main>
+
+      {/* ================= NOVO: MODAL DE DETALHES DO DIA SELECIONADO ================= */}
+      {selectedDayModal.isOpen && selectedDayModal.date && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-white/10 p-6 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
+            
+            <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-100 capitalize">
+                  {format(selectedDayModal.date, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                </h3>
+                <p className="text-xs text-slate-400">Resumo completo das atividades e transações do dia</p>
+              </div>
+              <button onClick={() => setSelectedDayModal({ isOpen: false, date: null })} className="p-2 text-slate-400 hover:text-slate-200 hover:bg-white/5 rounded-xl">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-2">
+              
+              {/* Seção de Eventos */}
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-indigo-400 mb-2 flex items-center gap-1.5">
+                  <CalendarIcon size={14} /> Eventos e Compromissos
+                </h4>
+                
+                {agendaItems?.filter(i => i.date === format(selectedDayModal.date, 'yyyy-MM-dd')).length === 0 ? (
+                  <p className="text-xs text-slate-500 italic bg-black/20 p-3 rounded-xl border border-white/5">Nenhum evento agendado para este dia.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {agendaItems?.filter(i => i.date === format(selectedDayModal.date, 'yyyy-MM-dd')).map(evento => (
+                      <div key={evento.id} className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl flex flex-col gap-1">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-slate-200">{evento.title}</span>
+                          {evento.time && (
+                            <span className="text-xs font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded flex items-center gap-1">
+                              <Clock size={10} /> {evento.time.substring(0,5)}
+                            </span>
+                          )}
+                        </div>
+                        {evento.category && <span className="text-[10px] text-slate-400 uppercase">Categoria: {evento.category}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Seção de Transações */}
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-2 flex items-center gap-1.5">
+                  <Target size={14} /> Movimentações Financeiras
+                </h4>
+                
+                {transactions?.filter(t => t.date === format(selectedDayModal.date, 'yyyy-MM-dd')).length === 0 ? (
+                  <p className="text-xs text-slate-500 italic bg-black/20 p-3 rounded-xl border border-white/5">Nenhuma transação financeira registrada neste dia.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {transactions?.filter(t => t.date === format(selectedDayModal.date, 'yyyy-MM-dd')).map(transacao => {
+                      const isDespesa = transacao.type === 'despesa';
+                      return (
+                        <div key={transacao.id} className={`p-3 rounded-xl border flex justify-between items-center ${isDespesa ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'}`}>
+                          <div>
+                            <span className="text-sm font-medium block">{transacao.description}</span>
+                            <span className="text-[10px] uppercase opacity-80">{transacao.category}</span>
+                          </div>
+                          <span className="font-mono font-bold text-sm">
+                            {isDespesa ? '-' : '+'} R$ {Number(transacao.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-white/10 flex justify-end">
+              <button 
+                onClick={() => {
+                  // Atalho para ir direto para a visualização diária desse dia exato
+                  setCurrentDate(selectedDayModal.date);
+                  setCalendarMode('day');
+                  setSelectedDayModal({ isOpen: false, date: null });
+                }}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium rounded-xl transition-colors"
+              >
+                Abrir na Visão Diária Detalhada
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= MODAL DE ADICIONAR ================= */}
       {isModalOpen && (
