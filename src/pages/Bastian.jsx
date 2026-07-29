@@ -16,12 +16,14 @@ export default function Bastian() {
   const isAwakeRef = useRef(false); 
 
   useEffect(() => {
-    // Carrega as vozes assim que possível
+    // Garante o carregamento das vozes em sistemas iOS
     const loadVoices = () => {
       window.speechSynthesis.getVoices();
     };
     loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = loadVoices;
+    }
   }, []);
 
   useEffect(() => {
@@ -33,8 +35,6 @@ export default function Bastian() {
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
-    // Nota: O iOS pode ignorar o continuous=true após alguns segundos de silêncio, 
-    // mas o evento onend cuidará de religá-lo ou resetar o botão.
     recognition.continuous = true; 
     recognition.interimResults = true; 
 
@@ -110,35 +110,49 @@ export default function Bastian() {
     const utterance = new SpeechSynthesisUtterance(texto);
     const vozesDisponiveis = synthRef.current.getVoices();
     
-    // --- FILTRO DE VOZ MASCULINA ESPECÍFICO PARA IOS/APPLE E PC ---
+    // --- FILTRO DE VOZ: MODO EXTREMO PARA IOS ---
     
-    // 1. Tenta achar uma voz que seja explicitamente Premium/Enhanced (Alta qualidade)
-    let vozMasculina = vozesDisponiveis.find(v => 
-      v.lang.toLowerCase().includes('pt') && 
-      (v.name.includes('Premium') || v.name.includes('Enhanced') || v.name.includes('Online')) &&
-      (v.name.includes('Felipe') || v.name.includes('Thiago') || v.name.includes('Tiago') || v.name.includes('Antonio') || v.name.includes('Daniel'))
-    );
+    // Filtramos primeiro todas as vozes em português
+    const vozesPT = vozesDisponiveis.filter(v => v.lang.toLowerCase().includes('pt'));
+    
+    let vozMasculina = null;
 
-    // 2. Se não achar a Premium, procura os nomes masculinos padrão da Apple (Felipe/Thiago) e do Windows (Antonio/Daniel)
-    if (!vozMasculina) {
-      vozMasculina = vozesDisponiveis.find(v => 
-        v.lang.toLowerCase().includes('pt') && 
-        (v.name.includes('Felipe') || v.name.includes('Thiago') || v.name.includes('Tiago') || v.name.includes('Antonio') || v.name.includes('Daniel'))
-      );
-    }
+    if (vozesPT.length > 0) {
+      // 1. Prioridade Absoluta: Thiago ou Felipe (Nomes oficiais masculinos da Apple PT-BR)
+      vozMasculina = vozesPT.find(v => v.name.includes('Thiago') || v.name.includes('Felipe'));
+      
+      // 2. Prioridade Secundária: Antonio ou Daniel (Windows/Edge/Mac)
+      if (!vozMasculina) {
+        vozMasculina = vozesPT.find(v => v.name.includes('Antonio') || v.name.includes('Daniel'));
+      }
+      
+      // 3. Busca por qualquer indicação de voz premium/masculina
+      if (!vozMasculina) {
+        vozMasculina = vozesPT.find(v => v.name.toLowerCase().includes('male') || v.name.includes('Premium'));
+      }
 
-    // 3. Fallback genérico final
-    if (!vozMasculina) {
-      vozMasculina = vozesDisponiveis.find(v => v.lang.toLowerCase().includes('pt'));
+      // 4. Último recurso: pega a primeira voz PT-BR que NÃO seja a Luciana ou Vitória (vozes femininas comuns)
+      if (!vozMasculina) {
+        vozMasculina = vozesPT.find(v => !v.name.includes('Luciana') && !v.name.includes('Vitória') && !v.name.includes('Vitoria'));
+      }
+      
+      // 5. Se tudo falhar, pega a primeira disponível em português
+      if (!vozMasculina) {
+        vozMasculina = vozesPT[0];
+      }
     }
 
     if (vozMasculina) {
       utterance.voice = vozMasculina;
+      // Log interno para você saber qual voz o iPhone está te forçando a usar
+      console.log("Voz selecionada:", vozMasculina.name); 
     }
 
     utterance.lang = 'pt-BR';
-    utterance.pitch = 0.95; // No iPhone, baixar muito o pitch distorce a voz ruim. 0.95 é mais seguro.
-    utterance.rate = 1.05;  // Deixar levemente mais rápido disfarça o tom robótico no iOS.
+    // No iOS, mexer no pitch e rate de uma voz de baixa qualidade a torna ininteligível.
+    // Deixar cravado no padrão (1.0) minimiza a distorção robótica.
+    utterance.pitch = 1.0; 
+    utterance.rate = 1.0;  
     
     utterance.onend = () => {
       isBusyRef.current = false; 
@@ -170,10 +184,16 @@ export default function Bastian() {
     setTranscript(''); 
     setChatLog(prev => [...prev, { role: 'user', text: comandoTexto }]);
 
-    const resultado = await enviarComandoParaIA(comandoTexto);
-    
-    setChatLog(prev => [...prev, { role: 'bastian', text: resultado.mensagem }]);
-    falar(resultado.mensagem);
+    try {
+      const resultado = await enviarComandoParaIA(comandoTexto);
+      setChatLog(prev => [...prev, { role: 'bastian', text: resultado.mensagem }]);
+      falar(resultado.mensagem);
+    } catch (error) {
+      console.error("Erro na comunicação com a API:", error);
+      const mensagemErro = "Desculpe, senhor. Minhas conexões com o servidor principal estão instáveis no momento.";
+      setChatLog(prev => [...prev, { role: 'bastian', text: mensagemErro }]);
+      falar(mensagemErro);
+    }
   };
 
   const toggleIntercom = () => {
@@ -185,12 +205,9 @@ export default function Bastian() {
       setAiState('idle');
       setTranscript('');
     } else {
-      // --- HACK PARA IPHONE/IOS ---
-      // Força o navegador a desbloquear o motor de áudio através do toque do usuário
       const unlockUtterance = new SpeechSynthesisUtterance('');
-      unlockUtterance.volume = 0; // Silencioso
+      unlockUtterance.volume = 0; 
       window.speechSynthesis.speak(unlockUtterance);
-      // -----------------------------
 
       setIsIntercomActive(true);
       intercomRef.current = true;

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { useAgendaStore } from '../store/useAgendaStore'; // NOVO: Trazendo a agenda
-import { useInboxStore } from '../store/useInboxStore';   // NOVO: Trazendo as tarefas rápidas
-import { Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar, Target, CheckSquare } from 'lucide-react';
+import { useAgendaStore } from '../store/useAgendaStore'; 
+import { useInboxStore } from '../store/useInboxStore';   
+import { Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar, Target, CheckSquare, Clock } from 'lucide-react';
 
 // Importando nossos componentes modulares
 import StatCard from '../components/StatCard';
@@ -70,7 +70,7 @@ export default function Dashboard() {
   }, [fetchTransactions, fetchHealthLogs, fetchAgendaItems, fetchInboxTasks]);
 
   // --- FILTRAGEM DE HOJE (AGENDA E TAREFAS) ---
-  const { eventosDeHoje, tarefasPendentes } = useMemo(() => {
+  const { eventosDeHoje, tarefasPendentes, tarefasTotaisHoje, proximoEvento } = useMemo(() => {
     const hoje = new Date();
     const yyyy = hoje.getFullYear();
     const mm = String(hoje.getMonth() + 1).padStart(2, '0');
@@ -82,8 +82,19 @@ export default function Dashboard() {
       .sort((a, b) => (a.time || '24:00').localeCompare(b.time || '24:00'));
 
     const tarefas = inboxTasks.filter(t => !t.completed);
+    
+    // Lógica para o Progresso do Dia e Próximo Evento
+    const tarefasTotais = inboxTasks.length;
+    
+    const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const eventoSeguinte = eventos.find(e => (e.time || '24:00') >= horaAtual);
 
-    return { eventosDeHoje: eventos, tarefasPendentes: tarefas };
+    return { 
+      eventosDeHoje: eventos, 
+      tarefasPendentes: tarefas,
+      tarefasTotaisHoje: tarefasTotais,
+      proximoEvento: eventoSeguinte
+    };
   }, [agendaItems, inboxTasks]);
 
   // --- FILTRAGEM MENSAL (FINANÇAS E SAÚDE) ---
@@ -123,7 +134,7 @@ export default function Dashboard() {
     });
   }, [healthLogs, filterMonth, filterYear]);
 
-  // --- CÁLCULOS ---
+  // --- CÁLCULOS PRINCIPAIS ---
   const totalReceitas = filteredTransactions
     .filter(t => (t.type === 'receita' || t.type === 'income') && (t.status || 'pago') === 'pago')
     .reduce((acc, t) => acc + Number(t.amount || 0), 0);
@@ -143,6 +154,10 @@ export default function Dashboard() {
     .slice()
     .sort((a, b) => new Date(b.created_at || b.date) - new Date(a.created_at || a.date))
     .slice(0, 5);
+
+  // Cálculo de Progresso de Tarefas
+  const tarefasConcluidas = tarefasTotaisHoje - tarefasPendentes.length;
+  const porcentagemProgresso = tarefasTotaisHoje === 0 ? 0 : Math.round((tarefasConcluidas / tarefasTotaisHoje) * 100);
 
   const financeChartData = useMemo(() => {
     const agrupado = filteredTransactions.reduce((acc, t) => {
@@ -253,13 +268,30 @@ export default function Dashboard() {
             footerContent={<span>Peso atual: <strong className="font-mono text-slate-200">{ultimoPeso ? `${ultimoPeso.value} ${ultimoPeso.unit}` : '--'}</strong></span>}
           />
 
+          {/* --- NOVO CARD DE PROGRESSO --- */}
           <StatCard 
-            title="Status da Rotina" 
-            icon={CalendarIcon} 
+            title="Execução Diária" 
+            icon={Target} 
             colorClass="text-indigo-400"
-            mainValue="Foco & Produtividade"
-            subtext="Utilize o Pomodoro ao lado para gerenciar suas tarefas."
-            footerContent={<span className="text-indigo-400 font-medium">Sincronizado</span>}
+            mainValue={`${porcentagemProgresso}% Concluído`}
+            subtext={
+              <span className="flex items-center gap-1.5 mt-1">
+                <Clock size={12} className="text-indigo-400" />
+                {proximoEvento ? (
+                  <span className="truncate text-slate-300">Próximo: {proximoEvento.title} ({proximoEvento.time.substring(0,5)})</span>
+                ) : (
+                  <span className="text-slate-500">Agenda livre para o resto do dia.</span>
+                )}
+              </span>
+            }
+            footerContent={
+              <div className="w-full bg-black/30 rounded-full h-1.5 mt-2 border border-white/5">
+                <div 
+                  className="bg-indigo-500 h-1.5 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
+                  style={{ width: `${porcentagemProgresso}%` }}
+                ></div>
+              </div>
+            }
           />
         </div>
 
@@ -273,7 +305,6 @@ export default function Dashboard() {
         <div className="lg:col-span-4 flex flex-col gap-6">
           <PomodoroWidget />
           
-          {/* --- NOVO WIDGET: FOCO DO DIA --- */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-col gap-5">
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
@@ -326,7 +357,6 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          {/* -------------------------------- */}
 
           <ActivityFeed atividades={ultimasAtividades} />
         </div>
