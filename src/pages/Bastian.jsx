@@ -16,11 +16,35 @@ export default function Bastian() {
   const isBusyRef = useRef(false); 
   const isAwakeRef = useRef(false); 
 
+  const tentarReligarMicrofone = () => {
+    if (!intercomRef.current) return;
+    
+    setAiState('listening');
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+      }
+    } catch (error) {
+      if (error.name !== 'InvalidStateError') {
+        intercomRef.current = false;
+        setIsIntercomActive(false);
+        setAiState('idle');
+      }
+    }
+  };
+
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert("Seu navegador não suporta reconhecimento de voz contínuo.");
       return;
+    }
+
+    // Limpeza preventiva de instâncias anteriores ao montar a página
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
     }
 
     const recognition = new SpeechRecognition();
@@ -77,7 +101,7 @@ export default function Bastian() {
     
     recognition.onend = () => {
       if (intercomRef.current && !isBusyRef.current) {
-        try { recognition.start(); } catch (e) {}
+        setTimeout(tentarReligarMicrofone, 200);
       } else if (!intercomRef.current) {
         setAiState('idle');
       }
@@ -85,9 +109,17 @@ export default function Bastian() {
 
     recognitionRef.current = recognition;
 
+    // Cleanup rigoroso ao sair da página do Bastian
     return () => {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      if (audioRef.current) audioRef.current.pause();
+      intercomRef.current = false;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     };
   }, []);
 
@@ -130,22 +162,7 @@ export default function Bastian() {
         audioRef.current.onended = () => {
           isBusyRef.current = false; 
           URL.revokeObjectURL(audioUrl); 
-          
-          if (intercomRef.current) {
-            try {
-              // Tenta religar o microfone (Funciona no PC)
-              setAiState('listening');
-              recognitionRef.current.start();
-            } catch (e) {
-              // MODO IPHONE (Walkie-Talkie): Se o sistema barrar o microfone,
-              // apenas soltamos o botão automaticamente para o usuário tocar de novo.
-              intercomRef.current = false;
-              setIsIntercomActive(false);
-              setAiState('idle');
-            }
-          } else {
-            setAiState('idle');
-          }
+          tentarReligarMicrofone(); 
         };
 
         await audioRef.current.play();
@@ -158,24 +175,15 @@ export default function Bastian() {
       const mensagemErro = `[FALHA DE SISTEMA]: ${error.message || error.name || 'Erro desconhecido'}.`;
       setChatLog(prev => [...prev, { role: 'bastian', text: mensagemErro }]);
       
-      if (intercomRef.current) {
-        try { 
-          setAiState('listening');
-          recognitionRef.current.start(); 
-        } catch (e) {
-          intercomRef.current = false;
-          setIsIntercomActive(false);
-          setAiState('idle');
-        }
-      } else {
-        setAiState('idle');
-      }
+      tentarReligarMicrofone();
     }
   };
 
   const executarComando = async (comandoTexto) => {
     isBusyRef.current = true; 
-    if (recognitionRef.current) recognitionRef.current.stop(); 
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
     
     setAiState('processing');
     setTranscript(''); 
@@ -197,33 +205,26 @@ export default function Bastian() {
     const novoEstado = !intercomRef.current;
     
     if (novoEstado) {
-      // 1. Desbloqueio de áudio rápido para o iOS
       if (audioRef.current) {
         audioRef.current.src = "data:audio/mp3;base64,//OlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAAOlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAA";
         audioRef.current.play().then(() => audioRef.current.pause()).catch(() => {});
       }
 
-      // 2. Atualiza os estados visuais
       intercomRef.current = true;
       setIsIntercomActive(true);
-      setAiState('listening');
       
-      // 3. Tenta iniciar. Se já estiver corrompido/rodando, ele reinicia à força.
-      try {
-        recognitionRef.current.start();
-      } catch (e) {
-        recognitionRef.current.stop();
-        setTimeout(() => {
-          try { recognitionRef.current.start(); } catch(err) {}
-        }, 200);
-      }
+      // Pequeno delay para garantir que o navegador liberou o canal de voz anterior
+      setTimeout(() => {
+        tentarReligarMicrofone();
+      }, 150);
+      
     } else {
       intercomRef.current = false;
       setIsIntercomActive(false);
       setAiState('idle');
       
       try {
-        recognitionRef.current.stop();
+        if (recognitionRef.current) recognitionRef.current.stop();
       } catch (e) {}
       
       if (audioRef.current) {
@@ -317,7 +318,6 @@ export default function Bastian() {
         )}
       </div>
       
-      {/* Elemento de áudio configurado corretamente */}
       <audio ref={audioRef} style={{ display: 'none' }} />
     </div>
   );
