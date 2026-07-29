@@ -13,6 +13,22 @@ import Treino from './pages/Treino';
 import Navbar from './components/Navbar';
 import BarraComandoIA from './components/BarraComandoIA';
 
+// =====================================================================
+// REGISTRO DO SERVICE WORKER (Bastian Notifier)
+// =====================================================================
+if ('serviceWorker' in navigator && 'PushManager' in window) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('Service Worker registrado com sucesso. Escopo:', registration.scope);
+      })
+      .catch((error) => {
+        console.error('Falha ao registrar o Service Worker:', error);
+      });
+  });
+}
+// =====================================================================
+
 function App() {
   const { user, initialize, isLoading } = useAuthStore();
   
