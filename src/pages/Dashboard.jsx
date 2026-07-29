@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { useAgendaStore } from '../store/useAgendaStore'; // NOVO: Trazendo a agenda
+import { useInboxStore } from '../store/useInboxStore';   // NOVO: Trazendo as tarefas rápidas
+import { Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar, Target, CheckSquare } from 'lucide-react';
 
-// Importando nossos novos componentes modulares
+// Importando nossos componentes modulares
 import StatCard from '../components/StatCard';
 import PomodoroWidget from '../components/PomodoroWidget';
 import FinanceChart from '../components/FinanceChart';
@@ -13,6 +15,8 @@ import ActivityFeed from '../components/ActivityFeed';
 export default function Dashboard() {
   const { transactions, fetchTransactions } = useFinanceStore();
   const { healthLogs, fetchHealthLogs } = useFitnessStore();
+  const { agendaItems, fetchAgendaItems } = useAgendaStore();
+  const { inboxTasks, fetchInboxTasks, toggleInboxTask } = useInboxStore();
 
   // --- ESTADO DE FILTRO POR MÊS E ANO ---
   const currentYear = new Date().getFullYear().toString();
@@ -61,9 +65,28 @@ export default function Dashboard() {
   useEffect(() => {
     fetchTransactions();
     fetchHealthLogs();
-  }, [fetchTransactions, fetchHealthLogs]);
+    fetchAgendaItems();
+    fetchInboxTasks();
+  }, [fetchTransactions, fetchHealthLogs, fetchAgendaItems, fetchInboxTasks]);
 
-  // --- FILTRAGEM ---
+  // --- FILTRAGEM DE HOJE (AGENDA E TAREFAS) ---
+  const { eventosDeHoje, tarefasPendentes } = useMemo(() => {
+    const hoje = new Date();
+    const yyyy = hoje.getFullYear();
+    const mm = String(hoje.getMonth() + 1).padStart(2, '0');
+    const dd = String(hoje.getDate()).padStart(2, '0');
+    const dataDeHojeStr = `${yyyy}-${mm}-${dd}`;
+
+    const eventos = agendaItems
+      .filter(item => item.date === dataDeHojeStr)
+      .sort((a, b) => (a.time || '24:00').localeCompare(b.time || '24:00'));
+
+    const tarefas = inboxTasks.filter(t => !t.completed);
+
+    return { eventosDeHoje: eventos, tarefasPendentes: tarefas };
+  }, [agendaItems, inboxTasks]);
+
+  // --- FILTRAGEM MENSAL (FINANÇAS E SAÚDE) ---
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.date) return true;
@@ -246,9 +269,65 @@ export default function Dashboard() {
           <WeightChart data={pesoChartData} />
         </div>
 
-        {/* COLUNA LATERAL: POMODORO & ATIVIDADES */}
+        {/* COLUNA LATERAL: POMODORO, FOCO DO DIA & ATIVIDADES */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           <PomodoroWidget />
+          
+          {/* --- NOVO WIDGET: FOCO DO DIA --- */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-col gap-5">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Target size={16} className="text-indigo-400" /> Foco de Hoje
+              </h3>
+              <span className="text-xs font-mono text-slate-400 bg-black/20 px-2 py-1 rounded-md">
+                {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+              </span>
+            </div>
+            
+            {/* Subseção: Eventos */}
+            <div className="flex flex-col gap-2">
+              <h4 className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                <CalendarIcon size={12} /> Compromissos
+              </h4>
+              {eventosDeHoje.length === 0 ? (
+                <p className="text-xs text-slate-500 italic bg-black/20 p-3 rounded-xl border border-white/5 text-center">Nenhum evento para hoje.</p>
+              ) : (
+                eventosDeHoje.map(evento => (
+                  <div key={evento.id} className="flex items-center justify-between bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl transition-colors hover:bg-indigo-500/20">
+                    <span className="text-sm text-slate-200 font-medium truncate pr-2">{evento.title}</span>
+                    {evento.time && <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/50 px-2 py-1 rounded shadow-inner shrink-0">{evento.time.substring(0,5)}</span>}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Subseção: Tarefas */}
+            <div className="flex flex-col gap-2 mt-2">
+              <h4 className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                <CheckSquare size={12} /> Inbox Pendente
+              </h4>
+              {tarefasPendentes.length === 0 ? (
+                <p className="text-xs text-slate-500 italic bg-black/20 p-3 rounded-xl border border-white/5 text-center">Sua mesa está limpa, senhor.</p>
+              ) : (
+                tarefasPendentes.slice(0, 5).map(task => (
+                  <div key={task.id} className="flex items-center gap-3 bg-black/20 border border-white/5 p-3 rounded-xl transition-colors hover:border-white/10 group">
+                    <input 
+                      type="checkbox" 
+                      checked={task.completed}
+                      onChange={() => toggleInboxTask(task.id, task.completed)}
+                      className="w-4 h-4 rounded border-white/20 bg-black/30 text-cyan-500 focus:ring-cyan-500/50 cursor-pointer transition-colors"
+                    />
+                    <span className="text-sm text-slate-300 truncate group-hover:text-slate-100 transition-colors">{task.title}</span>
+                  </div>
+                ))
+              )}
+              {tarefasPendentes.length > 5 && (
+                <span className="text-[10px] text-slate-500 text-center mt-1">+ {tarefasPendentes.length - 5} tarefas na aba Agenda</span>
+              )}
+            </div>
+          </div>
+          {/* -------------------------------- */}
+
           <ActivityFeed atividades={ultimasAtividades} />
         </div>
 

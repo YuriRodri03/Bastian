@@ -108,17 +108,26 @@ export default function Bastian() {
     synthRef.current.cancel(); 
 
     const utterance = new SpeechSynthesisUtterance(texto);
-    
-    // --- FILTRO DE VOZ MASCULINA AGRESSIVO ---
     const vozesDisponiveis = synthRef.current.getVoices();
     
-    // Procura especificamente pelas vozes masculinas conhecidas do Windows, Mac, Edge e iOS
+    // --- FILTRO DE VOZ MASCULINA ESPECÍFICO PARA IOS/APPLE E PC ---
+    
+    // 1. Tenta achar uma voz que seja explicitamente Premium/Enhanced (Alta qualidade)
     let vozMasculina = vozesDisponiveis.find(v => 
       v.lang.toLowerCase().includes('pt') && 
-      (v.name.includes('Antonio') || v.name.includes('Daniel') || v.name.includes('Tiago') || v.name.toLowerCase().includes('male'))
+      (v.name.includes('Premium') || v.name.includes('Enhanced') || v.name.includes('Online')) &&
+      (v.name.includes('Felipe') || v.name.includes('Thiago') || v.name.includes('Tiago') || v.name.includes('Antonio') || v.name.includes('Daniel'))
     );
 
-    // Fallback genérico caso o dispositivo realmente não tenha vozes masculinas com esses nomes
+    // 2. Se não achar a Premium, procura os nomes masculinos padrão da Apple (Felipe/Thiago) e do Windows (Antonio/Daniel)
+    if (!vozMasculina) {
+      vozMasculina = vozesDisponiveis.find(v => 
+        v.lang.toLowerCase().includes('pt') && 
+        (v.name.includes('Felipe') || v.name.includes('Thiago') || v.name.includes('Tiago') || v.name.includes('Antonio') || v.name.includes('Daniel'))
+      );
+    }
+
+    // 3. Fallback genérico final
     if (!vozMasculina) {
       vozMasculina = vozesDisponiveis.find(v => v.lang.toLowerCase().includes('pt'));
     }
@@ -128,8 +137,8 @@ export default function Bastian() {
     }
 
     utterance.lang = 'pt-BR';
-    utterance.pitch = 0.9; 
-    utterance.rate = 1.0;  
+    utterance.pitch = 0.95; // No iPhone, baixar muito o pitch distorce a voz ruim. 0.95 é mais seguro.
+    utterance.rate = 1.05;  // Deixar levemente mais rápido disfarça o tom robótico no iOS.
     
     utterance.onend = () => {
       isBusyRef.current = false; 
