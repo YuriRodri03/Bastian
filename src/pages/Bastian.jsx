@@ -13,14 +13,15 @@ export default function Bastian() {
   
   const intercomRef = useRef(false); 
   const isBusyRef = useRef(false); 
-  // NOVO: Ref para saber se ele acabou de ser chamado e está aguardando o comando
   const isAwakeRef = useRef(false); 
 
   useEffect(() => {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => {
+    // Carrega as vozes assim que possível
+    const loadVoices = () => {
       window.speechSynthesis.getVoices();
     };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
   useEffect(() => {
@@ -32,6 +33,8 @@ export default function Bastian() {
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
+    // Nota: O iOS pode ignorar o continuous=true após alguns segundos de silêncio, 
+    // mas o evento onend cuidará de religá-lo ou resetar o botão.
     recognition.continuous = true; 
     recognition.interimResults = true; 
 
@@ -51,20 +54,17 @@ export default function Bastian() {
 
       setTranscript(interimTranscript || finalTranscript);
 
-      // SÓ PROCESSA QUANDO A FRASE FOR CONCLUÍDA (Final)
       if (finalTranscript) {
         const text = finalTranscript.toLowerCase().trim();
 
-        // 1. Se o Bastian já foi "acordado" no turno anterior, a frase atual é o comando!
         if (isAwakeRef.current) {
-          isAwakeRef.current = false; // Reseta para não ficar executando tudo pra sempre
+          isAwakeRef.current = false; 
           if (text.length > 2) {
             executarComando(text);
           }
           return;
         }
 
-        // 2. Se não estava acordado, procura pela palavra-chave
         const regex = /(?:bastian|bastião|bastia)(.*)/i;
         const match = text.match(regex);
 
@@ -72,10 +72,8 @@ export default function Bastian() {
           const comando = match[1].trim();
           
           if (comando.length > 3) {
-            // Exemplo: O usuário disse tudo junto "Bastian registre uma despesa"
             executarComando(comando);
           } else {
-            // Exemplo: O usuário disse APENAS "Bastian". Ele responde e fica aguardando.
             isAwakeRef.current = true;
             falar("Sim, senhor?");
           }
@@ -103,54 +101,35 @@ export default function Bastian() {
     };
   }, []);
 
-  // Função para fazer o Bastian falar
   const falar = (texto) => {
-    isBusyRef.current = true; // Tranca os ouvidos
+    isBusyRef.current = true; 
     setAiState('speaking');
     
-    // Cancela qualquer fala que ainda esteja ocorrendo para evitar sobreposição
     synthRef.current.cancel(); 
 
     const utterance = new SpeechSynthesisUtterance(texto);
     
-    // --- NOVA LÓGICA DE SELEÇÃO DE VOZ RIGOROSA ---
+    // --- FILTRO DE VOZ MASCULINA AGRESSIVO ---
     const vozesDisponiveis = synthRef.current.getVoices();
     
-    // 1. Definição das vozes alvo (as mais humanas e masculinas disponíveis gratuitamente)
-    // Prioridade 1: Microsoft Antonio (Edge - Altíssima qualidade natural)
-    // Prioridade 2: Google português do Brasil (Chrome - Boa qualidade)
-    const nomesVozesAlvo = [
-      'Microsoft Antonio Online (Natural) - Portuguese (Brazil)',
-      'Google português do Brasil'
-    ];
+    // Procura especificamente pelas vozes masculinas conhecidas do Windows, Mac, Edge e iOS
+    let vozMasculina = vozesDisponiveis.find(v => 
+      v.lang.toLowerCase().includes('pt') && 
+      (v.name.includes('Antonio') || v.name.includes('Daniel') || v.name.includes('Tiago') || v.name.toLowerCase().includes('male'))
+    );
 
-    let vozSelecionada = null;
-
-    // Tenta encontrar uma das vozes alvo específicas
-    for (const nomeVoz of nomesVozesAlvo) {
-      vozSelecionada = vozesDisponiveis.find(v => v.name === nomeVoz);
-      if (vozSelecionada) break; // Achou uma das melhores, para de procurar
+    // Fallback genérico caso o dispositivo realmente não tenha vozes masculinas com esses nomes
+    if (!vozMasculina) {
+      vozMasculina = vozesDisponiveis.find(v => v.lang.toLowerCase().includes('pt'));
     }
 
-    // Fallback: Se não achou as vozes premium, procura QUALQUER voz masculina em PT-BR
-    if (!vozSelecionada) {
-      vozSelecionada = vozesDisponiveis.find(v => 
-        v.lang.startsWith('pt') && 
-        (v.name.includes('Daniel') || v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('masculino'))
-      );
-    }
-
-    // Aplica a voz se encontrada
-    if (vozSelecionada) {
-      utterance.voice = vozSelecionada;
-      // console.log(`Bastian usando voz: ${vozSelecionada.name}`); // Descomente para depurar
-    } else {
-      // console.warn("Nenhuma voz masculina preferencial encontrada. Usando padrão do sistema.");
+    if (vozMasculina) {
+      utterance.voice = vozMasculina;
     }
 
     utterance.lang = 'pt-BR';
-    utterance.pitch = 0.9; // Levemente mais grave para imponência
-    utterance.rate = 1.0;  // VELOCIDADE NORMAL (Humana)
+    utterance.pitch = 0.9; 
+    utterance.rate = 1.0;  
     
     utterance.onend = () => {
       isBusyRef.current = false; 
@@ -179,7 +158,7 @@ export default function Bastian() {
     recognitionRef.current.stop(); 
     
     setAiState('processing');
-    setTranscript(''); // Limpa o texto da tela para a nova resposta
+    setTranscript(''); 
     setChatLog(prev => [...prev, { role: 'user', text: comandoTexto }]);
 
     const resultado = await enviarComandoParaIA(comandoTexto);
@@ -192,11 +171,18 @@ export default function Bastian() {
     if (isIntercomActive) {
       setIsIntercomActive(false);
       intercomRef.current = false;
-      isAwakeRef.current = false; // Desliga o gatilho se estiver ativo
+      isAwakeRef.current = false; 
       recognitionRef.current.stop();
       setAiState('idle');
       setTranscript('');
     } else {
+      // --- HACK PARA IPHONE/IOS ---
+      // Força o navegador a desbloquear o motor de áudio através do toque do usuário
+      const unlockUtterance = new SpeechSynthesisUtterance('');
+      unlockUtterance.volume = 0; // Silencioso
+      window.speechSynthesis.speak(unlockUtterance);
+      // -----------------------------
+
       setIsIntercomActive(true);
       intercomRef.current = true;
       setAiState('listening');
