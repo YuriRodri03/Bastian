@@ -100,7 +100,6 @@ export default function Bastian() {
     }
     
     try {
-      // 1. Usamos fetch direto para não corromper o binário do MP3
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
       
@@ -120,7 +119,6 @@ export default function Bastian() {
         throw new Error(`Erro na Edge Function: ${response.status}`);
       }
 
-      // 2. Extraímos como ArrayBuffer puro!
       const arrayBuffer = await response.arrayBuffer();
       const audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -132,9 +130,19 @@ export default function Bastian() {
         audioRef.current.onended = () => {
           isBusyRef.current = false; 
           URL.revokeObjectURL(audioUrl); 
+          
           if (intercomRef.current) {
-            setAiState('listening');
-            try { recognitionRef.current.start(); } catch (e) {}
+            try {
+              // Tenta religar o microfone (Funciona no PC)
+              setAiState('listening');
+              recognitionRef.current.start();
+            } catch (e) {
+              // MODO IPHONE (Walkie-Talkie): Se o sistema barrar o microfone,
+              // apenas soltamos o botão automaticamente para o usuário tocar de novo.
+              intercomRef.current = false;
+              setIsIntercomActive(false);
+              setAiState('idle');
+            }
           } else {
             setAiState('idle');
           }
@@ -147,13 +155,18 @@ export default function Bastian() {
       console.error("Erro detalhado na síntese neural:", error);
       isBusyRef.current = false;
       
-      // NOVO: Faz o Bastian imprimir o erro exato na tela do iPhone
       const mensagemErro = `[FALHA DE SISTEMA]: ${error.message || error.name || 'Erro desconhecido'}.`;
       setChatLog(prev => [...prev, { role: 'bastian', text: mensagemErro }]);
       
       if (intercomRef.current) {
-        setAiState('listening');
-        try { recognitionRef.current.start(); } catch (e) {}
+        try { 
+          setAiState('listening');
+          recognitionRef.current.start(); 
+        } catch (e) {
+          intercomRef.current = false;
+          setIsIntercomActive(false);
+          setAiState('idle');
+        }
       } else {
         setAiState('idle');
       }
@@ -182,29 +195,33 @@ export default function Bastian() {
 
   const toggleIntercom = () => {
     const novoEstado = !intercomRef.current;
-    intercomRef.current = novoEstado;
-    setIsIntercomActive(novoEstado);
-
+    
     if (novoEstado) {
-      // ----------------------------------------------------------------------
-      // NOVO: "Desbloqueio" de Áudio para o iOS
-      // Ao tocar no botão, forçamos um som silencioso para liberar o hardware
-      // ----------------------------------------------------------------------
+      // 1. Desbloqueio de áudio rápido para o iOS
       if (audioRef.current) {
-        // Um minúsculo arquivo MP3 contendo apenas silêncio em formato Base64
         audioRef.current.src = "data:audio/mp3;base64,//OlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAAOlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAA";
-        audioRef.current.play().then(() => {
-          // Assim que o silêncio tocar, pausamos. O alto-falante agora está "livre".
-          audioRef.current.pause();
-        }).catch(err => console.log("Aviso de desbloqueio (normal em alguns PCs):", err));
+        audioRef.current.play().then(() => audioRef.current.pause()).catch(() => {});
       }
 
+      // 2. Atualiza os estados visuais
+      intercomRef.current = true;
+      setIsIntercomActive(true);
       setAiState('listening');
+      
+      // 3. Tenta iniciar. Se já estiver corrompido/rodando, ele reinicia à força.
       try {
         recognitionRef.current.start();
-      } catch (e) {}
+      } catch (e) {
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          try { recognitionRef.current.start(); } catch(err) {}
+        }, 200);
+      }
     } else {
+      intercomRef.current = false;
+      setIsIntercomActive(false);
       setAiState('idle');
+      
       try {
         recognitionRef.current.stop();
       } catch (e) {}
