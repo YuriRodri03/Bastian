@@ -181,6 +181,19 @@ export default function Bastian() {
     setIsIntercomActive(novoEstado);
 
     if (novoEstado) {
+      // ----------------------------------------------------------------------
+      // NOVO: "Desbloqueio" de Áudio para o iOS
+      // Ao tocar no botão, forçamos um som silencioso para liberar o hardware
+      // ----------------------------------------------------------------------
+      if (audioRef.current) {
+        // Um minúsculo arquivo MP3 contendo apenas silêncio em formato Base64
+        audioRef.current.src = "data:audio/mp3;base64,//OlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAAOlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAA";
+        audioRef.current.play().then(() => {
+          // Assim que o silêncio tocar, pausamos. O alto-falante agora está "livre".
+          audioRef.current.pause();
+        }).catch(err => console.log("Aviso de desbloqueio (normal em alguns PCs):", err));
+      }
+
       setAiState('listening');
       try {
         recognitionRef.current.start();
