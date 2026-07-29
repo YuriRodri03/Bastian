@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Activity, MessageSquare } from 'lucide-react';
 import { enviarComandoParaIA } from '../services/aiService';
+import { supabase } from '../lib/supabase';
 
 export default function Bastian() {
   const [aiState, setAiState] = useState('idle');
@@ -9,22 +10,11 @@ export default function Bastian() {
   const [chatLog, setChatLog] = useState([]);
   
   const recognitionRef = useRef(null);
-  const synthRef = useRef(window.speechSynthesis);
+  const audioRef = useRef(null); 
   
   const intercomRef = useRef(false); 
   const isBusyRef = useRef(false); 
   const isAwakeRef = useRef(false); 
-
-  useEffect(() => {
-    // Garante o carregamento das vozes em sistemas iOS
-    const loadVoices = () => {
-      window.speechSynthesis.getVoices();
-    };
-    loadVoices();
-    if (speechSynthesis.onvoiceschanged !== undefined) {
-      speechSynthesis.onvoiceschanged = loadVoices;
-    }
-  }, []);
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -96,89 +86,78 @@ export default function Bastian() {
     recognitionRef.current = recognition;
 
     return () => {
-      recognition.stop();
-      synthRef.current.cancel();
+      if (recognitionRef.current) recognitionRef.current.stop();
+      if (audioRef.current) audioRef.current.pause();
     };
   }, []);
 
-  const falar = (texto) => {
+  const falar = async (texto) => {
     isBusyRef.current = true; 
-    setAiState('speaking');
+    setAiState('processing'); 
     
-    synthRef.current.cancel(); 
-
-    const utterance = new SpeechSynthesisUtterance(texto);
-    const vozesDisponiveis = synthRef.current.getVoices();
-    
-    // --- FILTRO DE VOZ: MODO EXTREMO PARA IOS ---
-    
-    // Filtramos primeiro todas as vozes em português
-    const vozesPT = vozesDisponiveis.filter(v => v.lang.toLowerCase().includes('pt'));
-    
-    let vozMasculina = null;
-
-    if (vozesPT.length > 0) {
-      // 1. Prioridade Absoluta: Thiago ou Felipe (Nomes oficiais masculinos da Apple PT-BR)
-      vozMasculina = vozesPT.find(v => v.name.includes('Thiago') || v.name.includes('Felipe'));
-      
-      // 2. Prioridade Secundária: Antonio ou Daniel (Windows/Edge/Mac)
-      if (!vozMasculina) {
-        vozMasculina = vozesPT.find(v => v.name.includes('Antonio') || v.name.includes('Daniel'));
-      }
-      
-      // 3. Busca por qualquer indicação de voz premium/masculina
-      if (!vozMasculina) {
-        vozMasculina = vozesPT.find(v => v.name.toLowerCase().includes('male') || v.name.includes('Premium'));
-      }
-
-      // 4. Último recurso: pega a primeira voz PT-BR que NÃO seja a Luciana ou Vitória (vozes femininas comuns)
-      if (!vozMasculina) {
-        vozMasculina = vozesPT.find(v => !v.name.includes('Luciana') && !v.name.includes('Vitória') && !v.name.includes('Vitoria'));
-      }
-      
-      // 5. Se tudo falhar, pega a primeira disponível em português
-      if (!vozMasculina) {
-        vozMasculina = vozesPT[0];
-      }
+    if (audioRef.current) {
+      audioRef.current.pause();
     }
-
-    if (vozMasculina) {
-      utterance.voice = vozMasculina;
-      // Log interno para você saber qual voz o iPhone está te forçando a usar
-      console.log("Voz selecionada:", vozMasculina.name); 
-    }
-
-    utterance.lang = 'pt-BR';
-    // No iOS, mexer no pitch e rate de uma voz de baixa qualidade a torna ininteligível.
-    // Deixar cravado no padrão (1.0) minimiza a distorção robótica.
-    utterance.pitch = 1.0; 
-    utterance.rate = 1.0;  
     
-    utterance.onend = () => {
-      isBusyRef.current = false; 
+    try {
+      // 1. Usamos fetch direto para não corromper o binário do MP3
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const functionUrl = `${supabaseUrl}/functions/v1/bastian-tts`;
+
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ texto: texto })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na Edge Function: ${response.status}`);
+      }
+
+      // 2. Extraímos como ArrayBuffer puro!
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.onplay = () => setAiState('speaking');
+        
+        audioRef.current.onended = () => {
+          isBusyRef.current = false; 
+          URL.revokeObjectURL(audioUrl); 
+          if (intercomRef.current) {
+            setAiState('listening');
+            try { recognitionRef.current.start(); } catch (e) {}
+          } else {
+            setAiState('idle');
+          }
+        };
+
+        await audioRef.current.play();
+      }
+
+    } catch (error) {
+      console.error("Erro detalhado na síntese neural:", error);
+      isBusyRef.current = false;
       if (intercomRef.current) {
         setAiState('listening');
         try { recognitionRef.current.start(); } catch (e) {}
       } else {
         setAiState('idle');
       }
-    };
-
-    utterance.onerror = (event) => {
-      console.error("Erro na síntese de fala:", event);
-      isBusyRef.current = false;
-      if (intercomRef.current) {
-        setAiState('listening');
-        try { recognitionRef.current.start(); } catch (e) {}
-      }
-    };
-
-    synthRef.current.speak(utterance);
+    }
   };
 
   const executarComando = async (comandoTexto) => {
     isBusyRef.current = true; 
-    recognitionRef.current.stop(); 
+    if (recognitionRef.current) recognitionRef.current.stop(); 
     
     setAiState('processing');
     setTranscript(''); 
@@ -197,22 +176,25 @@ export default function Bastian() {
   };
 
   const toggleIntercom = () => {
-    if (isIntercomActive) {
-      setIsIntercomActive(false);
-      intercomRef.current = false;
-      isAwakeRef.current = false; 
-      recognitionRef.current.stop();
-      setAiState('idle');
-      setTranscript('');
-    } else {
-      const unlockUtterance = new SpeechSynthesisUtterance('');
-      unlockUtterance.volume = 0; 
-      window.speechSynthesis.speak(unlockUtterance);
+    const novoEstado = !intercomRef.current;
+    intercomRef.current = novoEstado;
+    setIsIntercomActive(novoEstado);
 
-      setIsIntercomActive(true);
-      intercomRef.current = true;
+    if (novoEstado) {
       setAiState('listening');
-      try { recognitionRef.current.start(); } catch (e) {}
+      try {
+        recognitionRef.current.start();
+      } catch (e) {}
+    } else {
+      setAiState('idle');
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = ''; 
+      }
     }
   };
 
@@ -299,6 +281,9 @@ export default function Bastian() {
           </div>
         )}
       </div>
+      
+      {/* Elemento de áudio configurado corretamente */}
+      <audio ref={audioRef} style={{ display: 'none' }} />
     </div>
   );
 }
