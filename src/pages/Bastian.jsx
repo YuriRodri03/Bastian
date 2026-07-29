@@ -146,6 +146,11 @@ export default function Bastian() {
     } catch (error) {
       console.error("Erro detalhado na síntese neural:", error);
       isBusyRef.current = false;
+      
+      // NOVO: Faz o Bastian imprimir o erro exato na tela do iPhone
+      const mensagemErro = `[FALHA DE SISTEMA]: ${error.message || error.name || 'Erro desconhecido'}.`;
+      setChatLog(prev => [...prev, { role: 'bastian', text: mensagemErro }]);
+      
       if (intercomRef.current) {
         setAiState('listening');
         try { recognitionRef.current.start(); } catch (e) {}
