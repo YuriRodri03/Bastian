@@ -16,35 +16,39 @@ export default function Bastian() {
   const isBusyRef = useRef(false); 
   const isAwakeRef = useRef(false); 
   
-  // NOVO: Ref para detectar se o iOS aplicou o bloqueio silencioso
   const micStartSuccessRef = useRef(false);
+  
+  // NOVOS CONTROLES ANTI-LOOP PARA O IPHONE
+  const needsTouchRef = useRef(false); 
+  const timeoutRef = useRef(null);
 
   const tentarReligarMicrofone = () => {
     if (!intercomRef.current) return;
+    if (needsTouchRef.current) return; // Freio de mão: impede o loop de onend
     
     micStartSuccessRef.current = false;
-    setAiState('starting'); // Estado visual transitório
+    setAiState('starting'); 
     
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
     try {
       if (recognitionRef.current) {
         recognitionRef.current.start();
       }
     } catch (error) {
       if (error.name !== 'InvalidStateError') {
-        // iOS barrou com erro explícito
+        needsTouchRef.current = true;
         setAiState('needs_touch');
         return;
       } else {
-        // Já estava ligado (normal no PC)
         micStartSuccessRef.current = true;
         setAiState('listening');
       }
     }
 
-    // Detecção de "Falha Silenciosa" (Típico do iPhone)
-    // Se o microfone não iniciar de fato em 800ms, o iOS bloqueou.
-    setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       if (intercomRef.current && !micStartSuccessRef.current) {
+        needsTouchRef.current = true;
         setAiState('needs_touch');
       }
     }, 800);
@@ -67,9 +71,18 @@ export default function Bastian() {
     recognition.interimResults = true; 
 
     recognition.onstart = () => {
-      // Confirma que o microfone ligou com sucesso (O PC chega aqui, o iOS não)
       micStartSuccessRef.current = true;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current); // Cancela o detector de falha
       if (!isBusyRef.current) setAiState('listening');
+    };
+
+    // NOVO: Detecta instantaneamente a recusa de permissão do iOS
+    recognition.onerror = (event) => {
+      if (event.error === 'not-allowed' || event.error === 'audio-capture') {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        needsTouchRef.current = true;
+        setAiState('needs_touch');
+      }
     };
 
     recognition.onresult = (event) => {
@@ -116,7 +129,8 @@ export default function Bastian() {
     };
     
     recognition.onend = () => {
-      if (intercomRef.current && !isBusyRef.current) {
+      // NOVO: Só tenta religar se NÃO estiver aguardando o toque do usuário
+      if (intercomRef.current && !isBusyRef.current && !needsTouchRef.current) {
         setTimeout(tentarReligarMicrofone, 200);
       } else if (!intercomRef.current) {
         setAiState('idle');
@@ -127,6 +141,7 @@ export default function Bastian() {
 
     return () => {
       intercomRef.current = false;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
       }
@@ -218,6 +233,8 @@ export default function Bastian() {
     const novoEstado = !intercomRef.current;
     
     if (novoEstado) {
+      needsTouchRef.current = false; // Garante que começa destravado
+      
       if (audioRef.current) {
         audioRef.current.src = "data:audio/mp3;base64,//OlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAAOlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAA";
         audioRef.current.play().then(() => audioRef.current.pause()).catch(() => {});
@@ -233,6 +250,7 @@ export default function Bastian() {
     } else {
       intercomRef.current = false;
       setIsIntercomActive(false);
+      needsTouchRef.current = false;
       setAiState('idle');
       
       try {
@@ -267,10 +285,10 @@ export default function Bastian() {
   return (
     <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center relative overflow-hidden font-mono select-none p-6">
       
-      {/* NOVO: OVERLAY DE RETOMADA PARA iPHONE */}
       {aiState === 'needs_touch' && (
         <div 
           onClick={() => {
+            needsTouchRef.current = false; // Libera o freio de mão
             if (audioRef.current) {
               audioRef.current.play().then(() => audioRef.current.pause()).catch(()=>{});
             }

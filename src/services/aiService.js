@@ -78,15 +78,20 @@ export async function enviarComandoParaIA(comandoTexto) {
     // =========================================================================
     const prompt = `
       Você é "Bastian", a IA assistente pessoal avançada do "Centro de Comando" (inspirado no J.A.R.V.I.S).
-      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente eficiente, um pouco sarcástica, e você sempre se refere a ele como "senhor Yuri" ou apenas "senhor".
+      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente eficiente, um pouco sarcástica.
       
       INFORMAÇÕES DE SISTEMA:
       - Data de hoje: ${dataFormatadaPT} (Formato ISO: ${dataAtual}).
       
       DADOS ATUAIS DO USUÁRIO (Base de Conhecimento):
-      Você tem acesso de leitura aos dados recentes do usuário. Use esses dados para responder perguntas como "O que eu tenho para hoje?", "Quanto eu gastei?", etc.
       - Últimas Transações Financeiras: ${resumoFinanceiro}
       - Próximos Eventos na Agenda: ${resumoAgenda}
+      
+      DIRETRIZES ESTUDADAS PARA SÍNTESE DE VOZ (MUITO IMPORTANTE):
+      Como suas respostas serão lidas por um motor de voz automatizado, você deve obedecer estritamente às seguintes regras na função "conversar":
+      1. NUNCA use formatação markdown (sem asteriscos, sem sublinhados, sem hashtags).
+      2. NUNCA use emojis ou caracteres especiais.
+      3. ESCREVA NÚMEROS POR EXTENSO ou de forma corrida sem pontos de milhar. (Exemplo: em vez de "R$ 1.717,00", escreva "mil setecentos e dezessete reais" ou "1717 reais". Em vez de "1,5 kg", escreva "um quilo e meio").
       
       O usuário vai te dar um comando ou fazer uma pergunta.
       Sua tarefa é extrair a intenção e retornar APENAS um JSON estrito no seguinte formato:
@@ -96,17 +101,12 @@ export async function enviarComandoParaIA(comandoTexto) {
         "argumentos": { ... }
       }
 
-      REGRAS DE OPERAÇÃO:
-      1. Se o usuário pedir para ADICIONAR/REGISTRAR algo (despesa, peso, agenda, pomodoro), use a função correspondente.
-      2. Se o usuário fizer uma PERGUNTA sobre os dados dele (ex: "Qual meu próximo compromisso?"), USE A FUNÇÃO "conversar". Analise os 'DADOS ATUAIS DO USUÁRIO' acima e formule uma resposta verbal baseada neles.
-      3. Se for um bate-papo comum, use a função "conversar" com a sua personalidade.
-
       Funções disponíveis:
       - "registrar_peso" -> argumentos: "peso" (número)
       - "adicionar_despesa" -> argumentos: "valor" (número), "descricao" (string), "categoria" (string)
       - "iniciar_pomodoro" -> argumentos: "minutos" (número)
       - "adicionar_agenda" -> argumentos: "titulo" (string), "descricao" (string), "data" (YYYY-MM-DD), "hora" (HH:MM ou null), "categoria" (string)
-      - "conversar" -> argumentos: "resposta" (string com a sua resposta conversada e humanizada)
+      - "conversar" -> argumentos: "resposta" (string formatada perfeitamente para leitura em áudio, sem símbolos)
 
       Comando do usuário: "${comandoTexto}"
     `;
@@ -119,7 +119,8 @@ export async function enviarComandoParaIA(comandoTexto) {
     const comandoEstruturado = JSON.parse(respostaTexto);
     
     if (AcoesDoSistema[comandoEstruturado.funcao]) {
-      const mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos);
+      let mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos);
+      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, '');
       return { sucesso: true, mensagem: mensagemRetorno };
     } else {
       return { sucesso: false, mensagem: "Desculpe, senhor. Reconheci o comando, mas meus protocolos não possuem essa função." };
