@@ -15,22 +15,39 @@ export default function Bastian() {
   const intercomRef = useRef(false); 
   const isBusyRef = useRef(false); 
   const isAwakeRef = useRef(false); 
+  
+  // NOVO: Ref para detectar se o iOS aplicou o bloqueio silencioso
+  const micStartSuccessRef = useRef(false);
 
   const tentarReligarMicrofone = () => {
     if (!intercomRef.current) return;
     
-    setAiState('listening');
+    micStartSuccessRef.current = false;
+    setAiState('starting'); // Estado visual transitório
+    
     try {
       if (recognitionRef.current) {
         recognitionRef.current.start();
       }
     } catch (error) {
       if (error.name !== 'InvalidStateError') {
-        intercomRef.current = false;
-        setIsIntercomActive(false);
-        setAiState('idle');
+        // iOS barrou com erro explícito
+        setAiState('needs_touch');
+        return;
+      } else {
+        // Já estava ligado (normal no PC)
+        micStartSuccessRef.current = true;
+        setAiState('listening');
       }
     }
+
+    // Detecção de "Falha Silenciosa" (Típico do iPhone)
+    // Se o microfone não iniciar de fato em 800ms, o iOS bloqueou.
+    setTimeout(() => {
+      if (intercomRef.current && !micStartSuccessRef.current) {
+        setAiState('needs_touch');
+      }
+    }, 800);
   };
 
   useEffect(() => {
@@ -40,17 +57,20 @@ export default function Bastian() {
       return;
     }
 
-    // Limpeza preventiva de instâncias anteriores ao montar a página
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) {}
     }
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
     recognition.continuous = true; 
     recognition.interimResults = true; 
+
+    recognition.onstart = () => {
+      // Confirma que o microfone ligou com sucesso (O PC chega aqui, o iOS não)
+      micStartSuccessRef.current = true;
+      if (!isBusyRef.current) setAiState('listening');
+    };
 
     recognition.onresult = (event) => {
       if (isBusyRef.current) return; 
@@ -94,10 +114,6 @@ export default function Bastian() {
         }
       }
     };
-
-    recognition.onstart = () => {
-      if (!isBusyRef.current) setAiState('listening');
-    };
     
     recognition.onend = () => {
       if (intercomRef.current && !isBusyRef.current) {
@@ -109,13 +125,10 @@ export default function Bastian() {
 
     recognitionRef.current = recognition;
 
-    // Cleanup rigoroso ao sair da página do Bastian
     return () => {
       intercomRef.current = false;
       if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
+        try { recognitionRef.current.stop(); } catch (e) {}
       }
       if (audioRef.current) {
         audioRef.current.pause();
@@ -213,7 +226,6 @@ export default function Bastian() {
       intercomRef.current = true;
       setIsIntercomActive(true);
       
-      // Pequeno delay para garantir que o navegador liberou o canal de voz anterior
       setTimeout(() => {
         tentarReligarMicrofone();
       }, 150);
@@ -239,6 +251,7 @@ export default function Bastian() {
       case 'listening': return 'border-cyan-400 shadow-[0_0_40px_rgba(6,182,212,0.5)]';
       case 'processing': return 'border-amber-400 shadow-[0_0_60px_rgba(251,191,36,0.6)] animate-pulse';
       case 'speaking': return 'border-emerald-400 shadow-[0_0_80px_rgba(52,211,153,0.8)] scale-110 transition-transform duration-200';
+      case 'needs_touch': return 'border-cyan-500 shadow-[0_0_50px_rgba(6,182,212,0.6)] animate-bounce';
       default: return 'border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.2)] opacity-70';
     }
   };
@@ -246,12 +259,38 @@ export default function Bastian() {
   const getRingStyles = (baseSpeed) => {
     if (aiState === 'processing') return `animate-[spin_${baseSpeed / 2}s_linear_infinite] border-amber-500/50`;
     if (aiState === 'speaking') return `animate-[spin_${baseSpeed}s_linear_infinite] border-emerald-500/50`;
+    if (aiState === 'needs_touch') return `animate-[spin_${baseSpeed}s_linear_infinite] border-cyan-400 opacity-80`;
     if (aiState === 'idle') return `animate-[spin_${baseSpeed * 2}s_linear_infinite] opacity-50`;
     return `animate-[spin_${baseSpeed}s_linear_infinite] border-cyan-500/50`; 
   };
 
   return (
     <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center relative overflow-hidden font-mono select-none p-6">
+      
+      {/* NOVO: OVERLAY DE RETOMADA PARA iPHONE */}
+      {aiState === 'needs_touch' && (
+        <div 
+          onClick={() => {
+            if (audioRef.current) {
+              audioRef.current.play().then(() => audioRef.current.pause()).catch(()=>{});
+            }
+            tentarReligarMicrofone();
+          }}
+          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md cursor-pointer animate-in fade-in duration-300"
+        >
+          <div className="flex flex-col items-center gap-4 p-8 bg-cyan-950/40 border border-cyan-500/30 rounded-3xl shadow-[0_0_50px_rgba(6,182,212,0.2)]">
+            <div className="w-24 h-24 bg-cyan-500/20 rounded-full flex items-center justify-center animate-ping absolute"></div>
+            <Mic size={56} className="text-cyan-400 relative z-10 animate-pulse" />
+            <h2 className="text-2xl font-bold text-white tracking-widest uppercase text-center relative z-10 mt-4">
+              Toque para Continuar
+            </h2>
+            <p className="text-cyan-400/80 text-sm text-center relative z-10 max-w-xs mt-2">
+              Toque em qualquer lugar da tela para manter o canal de voz aberto.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#06b6d405_1px,transparent_1px),linear-gradient(to_bottom,#06b6d405_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
       
       <div className="relative z-10 flex flex-col items-center mb-12">
@@ -273,10 +312,14 @@ export default function Bastian() {
           </h1>
           <p className={`text-xs tracking-widest uppercase font-semibold ${
             aiState === 'listening' ? 'text-cyan-400 animate-pulse' :
+            aiState === 'starting' ? 'text-cyan-200' :
+            aiState === 'needs_touch' ? 'text-cyan-400 animate-bounce' :
             aiState === 'processing' ? 'text-amber-400 animate-pulse' :
             aiState === 'speaking' ? 'text-emerald-400' : 'text-slate-500'
           }`}>
             {aiState === 'listening' ? 'Aguardando palavra-chave "Bastian"...' :
+             aiState === 'starting' ? 'Reativando sensores...' :
+             aiState === 'needs_touch' ? 'Aguardando toque na tela...' :
              aiState === 'processing' ? 'Processando rede neural...' :
              aiState === 'speaking' ? 'Transmitindo resposta...' : 'Sistema em repouso'}
           </p>
