@@ -51,7 +51,7 @@ const AcoesDoSistema = {
 export async function enviarComandoParaIA(comandoTexto) {
   try {
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash", // Recomendo usar a nomenclatura atualizada
+      model: "gemini-flash-latest", // Recomendo usar a nomenclatura atualizada
       generationConfig: { responseMimeType: "application/json" }
     });
 
