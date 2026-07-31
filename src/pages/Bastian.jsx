@@ -18,13 +18,24 @@ export default function Bastian() {
   
   const micStartSuccessRef = useRef(false);
   
-  // NOVOS CONTROLES ANTI-LOOP PARA O IPHONE
   const needsTouchRef = useRef(false); 
   const timeoutRef = useRef(null);
 
+  // NOVO: Função para forçar o iPhone a pintar a tela imediatamente
+  const dispararTravaDeToque = () => {
+    needsTouchRef.current = true;
+    
+    // requestAnimationFrame diz ao navegador que uma animação de alta prioridade vai acontecer
+    requestAnimationFrame(() => {
+      setAiState('needs_touch');
+      // Ler a altura do body força o iOS a recalcular e redesenhar a tela inteira (Layout Thrashing)
+      void document.body.offsetHeight; 
+    });
+  };
+
   const tentarReligarMicrofone = () => {
     if (!intercomRef.current) return;
-    if (needsTouchRef.current) return; // Freio de mão: impede o loop de onend
+    if (needsTouchRef.current) return; 
     
     micStartSuccessRef.current = false;
     setAiState('starting'); 
@@ -37,8 +48,7 @@ export default function Bastian() {
       }
     } catch (error) {
       if (error.name !== 'InvalidStateError') {
-        needsTouchRef.current = true;
-        setAiState('needs_touch');
+        dispararTravaDeToque();
         return;
       } else {
         micStartSuccessRef.current = true;
@@ -48,8 +58,7 @@ export default function Bastian() {
 
     timeoutRef.current = setTimeout(() => {
       if (intercomRef.current && !micStartSuccessRef.current) {
-        needsTouchRef.current = true;
-        setAiState('needs_touch');
+        dispararTravaDeToque();
       }
     }, 800);
   };
@@ -72,16 +81,14 @@ export default function Bastian() {
 
     recognition.onstart = () => {
       micStartSuccessRef.current = true;
-      if (timeoutRef.current) clearTimeout(timeoutRef.current); // Cancela o detector de falha
+      if (timeoutRef.current) clearTimeout(timeoutRef.current); 
       if (!isBusyRef.current) setAiState('listening');
     };
 
-    // NOVO: Detecta instantaneamente a recusa de permissão do iOS
     recognition.onerror = (event) => {
       if (event.error === 'not-allowed' || event.error === 'audio-capture') {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        needsTouchRef.current = true;
-        setAiState('needs_touch');
+        dispararTravaDeToque();
       }
     };
 
@@ -129,7 +136,6 @@ export default function Bastian() {
     };
     
     recognition.onend = () => {
-      // NOVO: Só tenta religar se NÃO estiver aguardando o toque do usuário
       if (intercomRef.current && !isBusyRef.current && !needsTouchRef.current) {
         setTimeout(tentarReligarMicrofone, 200);
       } else if (!intercomRef.current) {
@@ -159,6 +165,10 @@ export default function Bastian() {
       audioRef.current.pause();
     }
     
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+    }
+    
     try {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
@@ -185,12 +195,44 @@ export default function Bastian() {
       
       if (audioRef.current) {
         audioRef.current.src = audioUrl;
-        audioRef.current.onplay = () => setAiState('speaking');
         
-        audioRef.current.onended = () => {
+        // NOVO: Centralizador de Encerramento (Watchdog)
+        const finalizarReproducao = () => {
+          if (!isBusyRef.current) return; // Se já foi liberado por outro gatilho, ignora
           isBusyRef.current = false; 
           URL.revokeObjectURL(audioUrl); 
-          tentarReligarMicrofone(); 
+          setTimeout(() => tentarReligarMicrofone(), 150);
+        };
+
+        audioRef.current.onplay = () => setAiState('speaking');
+        
+        // GATILHO 1: O evento padrão de fim de áudio (Funciona 90% das vezes)
+        audioRef.current.onended = finalizarReproducao;
+        
+        // GATILHO 2: Caso o áudio quebre no meio da reprodução
+        audioRef.current.onerror = finalizarReproducao;
+
+        // GATILHO 3: Hack para iOS (Às vezes o iPhone dispara 'pause' no fim da mídia em vez de 'ended')
+        audioRef.current.onpause = () => {
+          // Como estamos rodando um arquivo local carregado, ele não deveria pausar para carregar (buffering).
+          // Portanto, se pausou enquanto a IA estava ocupada, o iOS cortou o áudio ou ele terminou.
+          if (isBusyRef.current) finalizarReproducao();
+        };
+
+        // GATILHO 4: Fallback absoluto de tempo (Timeout)
+        audioRef.current.onloadedmetadata = () => {
+          // Lê quantos segundos o áudio gerado tem. Se por acaso falhar, assume 15 segundos.
+          const duracaoMs = (audioRef.current.duration && audioRef.current.duration !== Infinity 
+                              ? audioRef.current.duration 
+                              : 15) * 1000;
+          
+          // Adiciona 2 segundos extras de tolerância. Se o tempo estourar e ainda estiver travado, força o desbloqueio.
+          setTimeout(() => {
+            if (isBusyRef.current) {
+              console.warn("Bastian: Destravamento forçado por Timeout de segurança.");
+              finalizarReproducao();
+            }
+          }, duracaoMs + 2000);
         };
 
         await audioRef.current.play();
@@ -203,7 +245,7 @@ export default function Bastian() {
       const mensagemErro = `[FALHA DE SISTEMA]: ${error.message || error.name || 'Erro desconhecido'}.`;
       setChatLog(prev => [...prev, { role: 'bastian', text: mensagemErro }]);
       
-      tentarReligarMicrofone();
+      setTimeout(tentarReligarMicrofone, 150);
     }
   };
 
@@ -233,7 +275,7 @@ export default function Bastian() {
     const novoEstado = !intercomRef.current;
     
     if (novoEstado) {
-      needsTouchRef.current = false; // Garante que começa destravado
+      needsTouchRef.current = false; 
       
       if (audioRef.current) {
         audioRef.current.src = "data:audio/mp3;base64,//OlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAAOlkAAAAAAAAAAAAAAP/7gAAAAAAO0gAAAAAT/wgAA";
@@ -259,7 +301,7 @@ export default function Bastian() {
       
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.src = ''; 
+        // MELHORIA: Evitar zerar o src mantém a sessão de áudio "aquecida" no Safari
       }
     }
   };
@@ -288,7 +330,7 @@ export default function Bastian() {
       {aiState === 'needs_touch' && (
         <div 
           onClick={() => {
-            needsTouchRef.current = false; // Libera o freio de mão
+            needsTouchRef.current = false; 
             if (audioRef.current) {
               audioRef.current.play().then(() => audioRef.current.pause()).catch(()=>{});
             }
@@ -379,7 +421,8 @@ export default function Bastian() {
         )}
       </div>
       
-      <audio ref={audioRef} style={{ display: 'none' }} />
+      {/* MELHORIA: Atributos 'playsInline' e 'webkit-playsinline' evitam conflitos de mídia no iOS */}
+      <audio ref={audioRef} style={{ display: 'none' }} playsInline webkit-playsinline="true" preload="auto" />
     </div>
   );
 }
