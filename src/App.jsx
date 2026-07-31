@@ -131,10 +131,10 @@ function App() {
       <main className="bg-slate-950 min-h-screen text-slate-100 pb-24">
         <Routes>
           {/* Rota do Bastian */}
-          <Route path="/bastian" element={<Bastian />} />
+          <Route path="/" element={<Bastian />} />
 
           {/* Rota principal com o Dashboard integrado */}
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           
           {/* Rota oficial do módulo financeiro */}
           <Route path="/financeiro" element={<Financeiro />} />
