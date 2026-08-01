@@ -51,47 +51,61 @@ const AcoesDoSistema = {
 export async function enviarComandoParaIA(comandoTexto) {
   try {
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-flash-latest", // Recomendo usar a nomenclatura atualizada
+      model: "gemini-1.5-flash-latest", // Nome atualizado da engine do Gemini
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const dataAtual = new Date().toLocaleDateString('en-CA'); 
-    const dataFormatadaPT = new Date().toLocaleDateString('pt-BR');
+    // =========================================================================
+    // CORREÇÃO DE FUSO HORÁRIO: Garante a data local exata do Brasil (YYYY-MM-DD)
+    // =========================================================================
+    const hoje = new Date();
+    const offsetTempo = hoje.getTimezoneOffset() * 60000;
+    const dataLocal = new Date(hoje.getTime() - offsetTempo);
+    const dataAtual = dataLocal.toISOString().split('T')[0]; 
+    const dataFormatadaPT = dataLocal.toLocaleDateString('pt-BR');
 
     // =========================================================================
     // 1. INJEÇÃO DE CONTEXTO (A "Memória" RAM do Bastian)
-    // Vamos buscar os dados reais das suas stores antes de chamar a IA.
-    // DICA: Ajuste os nomes "transactions" e "items" para os nomes exatos
-    // que o senhor declarou dentro do Zustand e do Supabase.
     // =========================================================================
     
-    // Captura Finanças (Exemplo: apenas as transações do mês atual para não estourar o limite de tokens)
-    const transacoes = useFinanceStore.getState().transactions || [];
-    const resumoFinanceiro = JSON.stringify(transacoes.slice(-15)); // Manda só as 15 últimas movimentações
+    // Captura Finanças
+    const financeState = useFinanceStore.getState();
+    const transacoes = financeState.transactions || financeState.despesas || [];
+    const resumoFinanceiro = JSON.stringify(transacoes.slice(-15)); 
     
-    // Captura Agenda (Exemplo: eventos futuros)
-    const eventosAgenda = useAgendaStore.getState().items || [];
-    const resumoAgenda = JSON.stringify(eventosAgenda.filter(e => e.date >= dataAtual));
+    // Captura Agenda (Busca inteligente por vários nomes possíveis de arrays)
+    const agendaState = useAgendaStore.getState();
+    const eventosAgenda = agendaState.items || agendaState.eventos || agendaState.agenda || [];
+    
+    const eventosFuturos = eventosAgenda.filter(e => e.date >= dataAtual);
+    const resumoAgenda = JSON.stringify(eventosFuturos);
+
+    // LOG DE DEPURAÇÃO: Abra o console do navegador (F12) para ver o que o Bastian está lendo!
+    console.log("Bastian Vision - Data Atual:", dataAtual);
+    console.log("Bastian Vision - Todos os Eventos na Store:", eventosAgenda);
+    console.log("Bastian Vision - Eventos Filtrados p/ Hoje ou Futuro:", eventosFuturos);
 
     // =========================================================================
     // 2. O NOVO PROMPT CIENTE DO CONTEXTO
     // =========================================================================
     const prompt = `
-      Você é "Bastian", a IA assistente pessoal avançada do "Centro de Comando" (inspirado no J.A.R.V.I.S).
-      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente eficiente, um pouco sarcástica.
+      Você é "Bastian", a IA assistente pessoal avançada do "Centro de Comando".
+      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente eficiente e sutilmente sarcástica.
       
       INFORMAÇÕES DE SISTEMA:
       - Data de hoje: ${dataFormatadaPT} (Formato ISO: ${dataAtual}).
       
       DADOS ATUAIS DO USUÁRIO (Base de Conhecimento):
       - Últimas Transações Financeiras: ${resumoFinanceiro}
-      - Próximos Eventos na Agenda: ${resumoAgenda}
+      - Eventos na Agenda (Hoje e Futuro): ${resumoAgenda}
       
-      DIRETRIZES ESTUDADAS PARA SÍNTESE DE VOZ (MUITO IMPORTANTE):
+      IMPORTANTE: Se o usuário perguntar sobre a agenda de hoje, olhe nos 'Eventos na Agenda' e use a função "conversar" para descrever os compromissos marcados para a data ${dataAtual}. Se estiver vazio, informe que o dia está livre.
+
+      DIRETRIZES ESTUDADAS PARA SÍNTESE DE VOZ:
       Como suas respostas serão lidas por um motor de voz automatizado, você deve obedecer estritamente às seguintes regras na função "conversar":
       1. NUNCA use formatação markdown (sem asteriscos, sem sublinhados, sem hashtags).
       2. NUNCA use emojis ou caracteres especiais.
-      3. ESCREVA NÚMEROS POR EXTENSO ou de forma corrida sem pontos de milhar. (Exemplo: em vez de "R$ 1.717,00", escreva "mil setecentos e dezessete reais" ou "1717 reais". Em vez de "1,5 kg", escreva "um quilo e meio").
+      3. ESCREVA NÚMEROS E SÍMBOLOS POR EXTENSO (Exemplo: "R$ 1717,00" vira "mil setecentos e dezessete reais", "18:00" vira "dezoito horas").
       
       O usuário vai te dar um comando ou fazer uma pergunta.
       Sua tarefa é extrair a intenção e retornar APENAS um JSON estrito no seguinte formato:

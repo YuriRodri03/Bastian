@@ -20,8 +20,9 @@ export default function Bastian() {
   
   const needsTouchRef = useRef(false); 
   const timeoutRef = useRef(null);
+  const commandTimeoutRef = useRef(null); // Ref para a janela de tolerância de escuta
 
-  // NOVO: Função para forçar o iPhone a pintar a tela imediatamente
+  // Função para forçar o iPhone a pintar a tela imediatamente
   const dispararTravaDeToque = () => {
     needsTouchRef.current = true;
     
@@ -35,7 +36,13 @@ export default function Bastian() {
 
   const tentarReligarMicrofone = () => {
     if (!intercomRef.current) return;
-    if (needsTouchRef.current) return; 
+    
+    // CORREÇÃO CRÍTICA: Se a trava de toque estiver armada nos bastidores,
+    // nós FORÇAMOS o painel a exibir o botão antes de abortar.
+    if (needsTouchRef.current) {
+      setAiState('needs_touch');
+      return; 
+    }
     
     micStartSuccessRef.current = false;
     setAiState('starting'); 
@@ -111,14 +118,19 @@ export default function Bastian() {
       if (finalTranscript) {
         const text = finalTranscript.toLowerCase().trim();
 
+        // 1. Se o Bastian já foi ativado pela palavra-chave no chunk anterior
         if (isAwakeRef.current) {
+          // Cancela o "Sim, senhor?" porque recebemos o resto da frase!
+          if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
           isAwakeRef.current = false; 
+          
           if (text.length > 2) {
             executarComando(text);
           }
           return;
         }
 
+        // 2. Procurando a palavra-chave
         const regex = /(?:bastian|bastião|bastia)(.*)/i;
         const match = text.match(regex);
 
@@ -126,10 +138,21 @@ export default function Bastian() {
           const comando = match[1].trim();
           
           if (comando.length > 3) {
+            // O usuário falou a frase toda de uma vez em um único bloco contínuo
             executarComando(comando);
           } else {
+            // O tablet cortou a frase no meio ou o usuário falou apenas "Bastian".
+            // Vamos acordar a IA, mas aguardar um pouco antes de responder com voz.
             isAwakeRef.current = true;
-            falar("Sim, senhor?");
+            
+            if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
+            
+            // Espera 1.2 segundos para ver se o resto da frase chega
+            commandTimeoutRef.current = setTimeout(() => {
+              if (isAwakeRef.current) {
+                falar("Sim, senhor?");
+              }
+            }, 1200); 
           }
         }
       }
@@ -148,6 +171,7 @@ export default function Bastian() {
     return () => {
       intercomRef.current = false;
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current); // Limpeza extra
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
       }
@@ -196,44 +220,46 @@ export default function Bastian() {
       if (audioRef.current) {
         audioRef.current.src = audioUrl;
         
-        // NOVO: Centralizador de Encerramento (Watchdog)
+        // Timer global invencível (mesmo que o iOS ignore os metadados)
+        let watchdogTimer = null;
+
         const finalizarReproducao = () => {
-          if (!isBusyRef.current) return; // Se já foi liberado por outro gatilho, ignora
+          if (!isBusyRef.current) return; 
           isBusyRef.current = false; 
           URL.revokeObjectURL(audioUrl); 
+          if (watchdogTimer) clearTimeout(watchdogTimer);
           setTimeout(() => tentarReligarMicrofone(), 150);
         };
 
-        audioRef.current.onplay = () => setAiState('speaking');
+        audioRef.current.onplay = () => {
+          // CORREÇÃO: Só exibe "Transmitindo" se a tela não estiver bloqueada
+          if (!needsTouchRef.current) setAiState('speaking');
+        };
         
-        // GATILHO 1: O evento padrão de fim de áudio (Funciona 90% das vezes)
         audioRef.current.onended = finalizarReproducao;
-        
-        // GATILHO 2: Caso o áudio quebre no meio da reprodução
         audioRef.current.onerror = finalizarReproducao;
 
-        // GATILHO 3: Hack para iOS (Às vezes o iPhone dispara 'pause' no fim da mídia em vez de 'ended')
         audioRef.current.onpause = () => {
-          // Como estamos rodando um arquivo local carregado, ele não deveria pausar para carregar (buffering).
-          // Portanto, se pausou enquanto a IA estava ocupada, o iOS cortou o áudio ou ele terminou.
-          if (isBusyRef.current) finalizarReproducao();
+          // CORREÇÃO: Ignora pausas que acontecem no tempo zero (buffering do iOS)
+          if (isBusyRef.current && audioRef.current.currentTime > 0) finalizarReproducao();
         };
 
-        // GATILHO 4: Fallback absoluto de tempo (Timeout)
         audioRef.current.onloadedmetadata = () => {
-          // Lê quantos segundos o áudio gerado tem. Se por acaso falhar, assume 15 segundos.
           const duracaoMs = (audioRef.current.duration && audioRef.current.duration !== Infinity 
                               ? audioRef.current.duration 
                               : 15) * 1000;
           
-          // Adiciona 2 segundos extras de tolerância. Se o tempo estourar e ainda estiver travado, força o desbloqueio.
-          setTimeout(() => {
-            if (isBusyRef.current) {
-              console.warn("Bastian: Destravamento forçado por Timeout de segurança.");
-              finalizarReproducao();
-            }
+          if (watchdogTimer) clearTimeout(watchdogTimer);
+          watchdogTimer = setTimeout(() => {
+            if (isBusyRef.current) finalizarReproducao();
           }, duracaoMs + 2000);
         };
+
+        // GATILHO DE EMERGÊNCIA ABSOLUTA: Disparado no instante do play.
+        // Se o Safari falhar em carregar metadados, terminar, ou pausar, isso salva o sistema em 15s.
+        watchdogTimer = setTimeout(() => {
+          if (isBusyRef.current) finalizarReproducao();
+        }, 15000);
 
         await audioRef.current.play();
       }
