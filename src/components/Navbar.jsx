@@ -68,7 +68,7 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-16">
           
           {/* 1. LOGO E MARCA */}
-          <Link to="/" className="flex items-center gap-2 cursor-pointer transition-opacity hover:opacity-80">
+          <Link to="/dashboard" className="flex items-center gap-2 cursor-pointer transition-opacity hover:opacity-80">
             <div className="bg-indigo-500/20 p-2 rounded-lg border border-indigo-500/30">
               <Command className="w-5 h-5 text-cyan-400" />
             </div>
@@ -81,7 +81,7 @@ export default function Navbar() {
           <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700/50 shadow-inner overflow-x-auto">
             
             <Link 
-              to="/bastian"
+              to="/"
               className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-300 ${
                 location.pathname === '/bastian'
                   ? 'bg-slate-800 text-cyan-400 shadow-sm' 
