@@ -73,9 +73,9 @@ export async function enviarComandoParaIA(comandoTexto) {
     const transacoes = financeState.transactions || financeState.despesas || [];
     const resumoFinanceiro = JSON.stringify(transacoes.slice(-15)); 
     
-    // Captura Agenda (Busca inteligente por vários nomes possíveis de arrays)
+    // Captura Agenda (Agora com o nome EXATO da sua store)
     const agendaState = useAgendaStore.getState();
-    const eventosAgenda = agendaState.items || agendaState.eventos || agendaState.agenda || [];
+    const eventosAgenda = agendaState.agendaItems || [];
     
     const eventosFuturos = eventosAgenda.filter(e => e.date >= dataAtual);
     const resumoAgenda = JSON.stringify(eventosFuturos);
