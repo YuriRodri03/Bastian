@@ -3,13 +3,19 @@ import { useFinanceStore } from '../store/useFinanceStore';
 import { 
   Wallet, Plus, Minus, ArrowUpRight, ArrowDownRight, 
   Tag, Trash2, Pencil, X, PieChart as PieChartIcon,
-  TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter
+  TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
+  // Novos ícones para as categorias:
+  Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
+  PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-const CATEGORIAS_RECEITA = ['Salário', 'Bolsa Acadêmica/CNPq', 'Freelance', 'Rendimentos', 'Outros'];
-const CATEGORIAS_DESPESA = ['Alimentação', 'Moradia', 'Transporte', 'Contas', 'Saúde', 'Educação/Pesquisa', 'Lazer', 'Outros'];
-const CORES_GRAFICO = ['#6366f1', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ec4899', '#f43f5e', '#64748b'];
+// Categorias expandidas e refinadas
+const CATEGORIAS_RECEITA = ['Salário', 'Bolsa Acadêmica/CNPq', 'Freelance', 'Rendimentos/Investimentos', 'Restituição', 'Outros'];
+const CATEGORIAS_DESPESA = ['Alimentação', 'Moradia', 'Transporte', 'Contas Fixas', 'Saúde', 'Educação/Pesquisa', 'Assinaturas/Software', 'Lazer', 'Cartão de Crédito', 'Outros'];
+
+// Cores premium e suaves para o gráfico
+const CORES_GRAFICO = ['#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'];
 
 const MESES = [
   { valor: '01', nome: 'Janeiro' }, { valor: '02', nome: 'Fevereiro' },
@@ -19,6 +25,29 @@ const MESES = [
   { valor: '09', nome: 'Setembro' }, { valor: '10', nome: 'Outubro' },
   { valor: '11', nome: 'Novembro' }, { valor: '12', nome: 'Dezembro' }
 ];
+
+// Mapeamento visual das categorias (Ícone + Cor de fundo)
+const getCategoryIcon = (category) => {
+  switch (category) {
+    case 'Alimentação': return <Utensils size={14} className="text-orange-400" />;
+    case 'Moradia': return <Home size={14} className="text-indigo-400" />;
+    case 'Transporte': return <Car size={14} className="text-sky-400" />;
+    case 'Contas Fixas': return <Lightbulb size={14} className="text-yellow-400" />;
+    case 'Saúde': return <HeartPulse size={14} className="text-rose-400" />;
+    case 'Educação/Pesquisa': return <GraduationCap size={14} className="text-purple-400" />;
+    case 'Assinaturas/Software': return <Laptop size={14} className="text-cyan-400" />;
+    case 'Lazer': return <PartyPopper size={14} className="text-fuchsia-400" />;
+    case 'Cartão de Crédito': return <CreditCard size={14} className="text-slate-300" />;
+    
+    case 'Salário': return <Briefcase size={14} className="text-emerald-400" />;
+    case 'Bolsa Acadêmica/CNPq': return <Landmark size={14} className="text-blue-400" />;
+    case 'Freelance': return <Code size={14} className="text-teal-400" />;
+    case 'Rendimentos/Investimentos': return <TrendingUp size={14} className="text-green-400" />;
+    case 'Restituição': return <RefreshCw size={14} className="text-emerald-300" />;
+    
+    default: return <MoreHorizontal size={14} className="text-slate-400" />;
+  }
+};
 
 const formatCurrency = (value) => {
   let valueString = value.toString().replace(/\D/g, '');
@@ -51,9 +80,12 @@ const formatDateToBR = (dateString) => {
 const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-slate-900/90 border border-white/10 p-3 rounded-xl backdrop-blur-md shadow-xl">
-        <p className="text-sm font-medium text-slate-200 mb-1">{payload[0].name}</p>
-        <p className="text-sm font-mono text-rose-400">
+      <div className="bg-slate-900/95 border border-white/10 p-4 rounded-2xl backdrop-blur-xl shadow-2xl">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: payload[0].payload.fill }}></div>
+          <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">{payload[0].name}</p>
+        </div>
+        <p className="text-lg font-mono font-medium text-white">
           {payload[0].value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         </p>
       </div>
@@ -63,13 +95,12 @@ const CustomTooltip = ({ active, payload }) => {
 };
 
 export default function Financeiro() {
-  const { transactions, addTransaction, removeTransaction, updateTransaction, toggleTransactionStatus, balance, fetchTransactions } = useFinanceStore();
+  const { transactions, addTransaction, removeTransaction, updateTransaction, toggleTransactionStatus, fetchTransactions } = useFinanceStore();
 
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
 
-  // Estados do Formulário
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState('receita');
@@ -78,7 +109,6 @@ export default function Financeiro() {
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
 
-  // Estados dos Filtros (Iniciam com o mês e ano atuais)
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
   const [filterMonth, setFilterMonth] = useState(currentMonth);
@@ -90,7 +120,6 @@ export default function Financeiro() {
     }
   }, [type, editingId]);
 
-  // Identifica todos os anos que têm transações para montar o filtro de Ano
   const availableYears = useMemo(() => {
     const years = transactions.map(t => {
       return t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
@@ -100,7 +129,6 @@ export default function Financeiro() {
     return uniqueYears.sort((a, b) => b.localeCompare(a));
   }, [transactions, currentYear]);
 
-  // Filtra as transações baseadas no Mês e Ano selecionados
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.date) return true;
@@ -123,7 +151,6 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  // Cálculos Inteligentes limitados APENAS ao período filtrado
   const { totalReceitas, totalDespesas, aPagar, saldoPeriodo } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
       const tStatus = t.status || 'pago';
@@ -143,7 +170,6 @@ export default function Financeiro() {
     }, { totalReceitas: 0, totalDespesas: 0, aPagar: 0, saldoPeriodo: 0 });
   }, [filteredTransactions]);
 
-  // Gráfico reflete apenas o período filtrado
   const despesasPorCategoria = useMemo(() => {
     const despesas = filteredTransactions.filter(t => t.type === 'despesa' && (t.status || 'pago') === 'pago');
     const agrupado = despesas.reduce((acc, transacao) => {
@@ -211,40 +237,40 @@ export default function Financeiro() {
   });
 
   return (
-    <div className="min-h-screen p-8 font-sans flex flex-col items-center">
+    <div className="min-h-[calc(100vh-80px)] p-4 sm:p-8 font-sans flex flex-col items-center">
       
       {/* Cabeçalho com Filtros */}
-      <div className="w-full max-w-6xl mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-white/5 rounded-xl border border-white/10 backdrop-blur-md">
-            <Wallet className="text-slate-300 w-6 h-6" />
+      <div className="w-full max-w-7xl mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-gradient-to-br from-indigo-500/20 to-purple-500/10 rounded-2xl border border-indigo-500/20 backdrop-blur-md shadow-lg shadow-indigo-500/10">
+            <Wallet className="text-indigo-400 w-7 h-7" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-slate-100 tracking-wide">Visão Geral</h1>
-            <p className="text-sm text-slate-400">Planejamento e Controle Financeiro</p>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Centro Financeiro</h1>
+            <p className="text-sm text-slate-400 font-medium">Gestão de Recursos e Planejamento</p>
           </div>
         </div>
 
-        {/* Filtro de Período */}
-        <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-md shadow-lg">
-          <div className="pl-3 text-slate-400">
+        {/* Filtro de Período Modernizado */}
+        <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl">
+          <div className="pl-4 text-slate-400">
             <Filter size={16} />
           </div>
           <select 
             value={filterMonth}
             onChange={(e) => setFilterMonth(e.target.value)}
-            className="bg-transparent text-sm font-medium text-slate-200 focus:outline-none cursor-pointer py-1.5"
+            className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 hover:text-white transition-colors"
           >
             <option value="all" className="bg-slate-900 text-slate-200">Visão Anual</option>
             {MESES.map(m => (
               <option key={m.valor} value={m.valor} className="bg-slate-900 text-slate-200">{m.nome}</option>
             ))}
           </select>
-          <div className="w-px h-5 bg-white/10"></div>
+          <div className="w-px h-6 bg-white/10"></div>
           <select 
             value={filterYear}
             onChange={(e) => setFilterYear(e.target.value)}
-            className="bg-transparent text-sm font-medium text-slate-200 focus:outline-none cursor-pointer py-1.5 pr-2"
+            className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 pr-4 hover:text-white transition-colors"
           >
             {availableYears.map(year => (
               <option key={year} value={year} className="bg-slate-900 text-slate-200">{year}</option>
@@ -254,108 +280,106 @@ export default function Financeiro() {
       </div>
 
       {/* 4 Cards de Resumo */}
-      <div className="w-full max-w-6xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="w-full max-w-7xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur-xl shadow-lg relative overflow-hidden group">
-          <div className="flex justify-between items-center mb-4 relative z-10">
-            <span className="text-sm font-medium text-slate-400">Receitas Recebidas</span>
-            <div className="p-2 bg-emerald-500/10 rounded-lg">
-              <TrendingUp className="text-emerald-400 w-4 h-4" />
+        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
+          <div className="flex justify-between items-center mb-6 relative z-10">
+            <span className="text-sm font-semibold text-slate-400 tracking-wide uppercase">Receitas</span>
+            <div className="p-2.5 bg-emerald-500/10 rounded-xl">
+              <TrendingUp className="text-emerald-400 w-5 h-5" />
             </div>
           </div>
-          <div className="font-mono text-xl font-semibold text-emerald-400 relative z-10">
+          <div className="font-mono text-2xl font-bold text-emerald-400 relative z-10">
             {totalReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur-xl shadow-lg relative overflow-hidden group">
-          <div className="flex justify-between items-center mb-4 relative z-10">
-            <span className="text-sm font-medium text-slate-400">Despesas Pagas</span>
-            <div className="p-2 bg-rose-500/10 rounded-lg">
-              <TrendingDown className="text-rose-400 w-4 h-4" />
+        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
+          <div className="flex justify-between items-center mb-6 relative z-10">
+            <span className="text-sm font-semibold text-slate-400 tracking-wide uppercase">Despesas</span>
+            <div className="p-2.5 bg-rose-500/10 rounded-xl">
+              <TrendingDown className="text-rose-400 w-5 h-5" />
             </div>
           </div>
-          <div className="font-mono text-xl font-semibold text-rose-400 relative z-10">
+          <div className="font-mono text-2xl font-bold text-rose-400 relative z-10">
             {totalDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-white/5 border border-amber-500/30 rounded-2xl p-5 backdrop-blur-xl shadow-lg relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-            <Clock className="w-16 h-16 text-amber-400" />
-          </div>
-          <div className="flex justify-between items-center mb-4 relative z-10">
-            <span className="text-sm font-medium text-slate-300">Contas a Pagar</span>
-            <div className="p-2 bg-amber-500/20 rounded-lg">
-              <Clock className="text-amber-400 w-4 h-4" />
+        <div className="bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-amber-500/30 transition-all">
+          <div className="flex justify-between items-center mb-6 relative z-10">
+            <span className="text-sm font-semibold text-amber-200/70 tracking-wide uppercase">A Pagar</span>
+            <div className="p-2.5 bg-amber-500/20 rounded-xl">
+              <Clock className="text-amber-400 w-5 h-5" />
             </div>
           </div>
-          <div className="font-mono text-xl font-semibold text-amber-400 relative z-10">
+          <div className="font-mono text-2xl font-bold text-amber-400 relative z-10">
             {aPagar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-indigo-600/10 border border-indigo-500/30 rounded-2xl p-5 backdrop-blur-xl shadow-lg relative overflow-hidden group">
-          <div className="flex justify-between items-center mb-4 relative z-10">
-            <span className="text-sm font-medium text-indigo-200">Balanço do Período</span>
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <DollarSign className="text-indigo-300 w-4 h-4" />
+        <div className="bg-gradient-to-br from-indigo-500/20 to-transparent border border-indigo-500/30 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-indigo-500/40 transition-all">
+          <div className="flex justify-between items-center mb-6 relative z-10">
+            <span className="text-sm font-semibold text-indigo-200/70 tracking-wide uppercase">Balanço Final</span>
+            <div className="p-2.5 bg-indigo-500/20 rounded-xl">
+              <DollarSign className="text-indigo-300 w-5 h-5" />
             </div>
           </div>
-          <div className={`font-mono text-xl font-semibold relative z-10 ${saldoPeriodo >= 0 ? 'text-indigo-100' : 'text-rose-400'}`}>
+          <div className={`font-mono text-2xl font-bold relative z-10 ${saldoPeriodo >= 0 ? 'text-white' : 'text-rose-400'}`}>
             {saldoPeriodo >= 0 ? '+' : ''}{saldoPeriodo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
       </div>
 
-      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Grid Principal */}
+      <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* Coluna Esquerda: Formulário + Gráfico */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
+        {/* Coluna Esquerda: Formulário + Gráfico Donut */}
+        <div className="lg:col-span-1 flex flex-col gap-6 sticky top-24">
           
-          <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-xl shadow-xl h-fit">
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-sm font-semibold text-slate-300">
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-7 rounded-3xl backdrop-blur-xl shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-bold text-white">
                 {editingId ? 'Editar Transação' : 'Nova Transação'}
               </h2>
               {editingId && (
-                <button onClick={resetForm} className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1">
+                <button onClick={resetForm} className="text-xs font-semibold bg-white/10 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/20 transition-all flex items-center gap-1">
                   <X size={14} /> Cancelar
                 </button>
               )}
             </div>
             
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Descrição</label>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Descrição</label>
                 <input 
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50"
-                  placeholder="Ex: Aluguel, Internet..."
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
+                  placeholder="Ex: Aluguel, Supermercado..."
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Valor</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Valor</label>
                   <input 
                     type="text"
                     inputMode="numeric"
                     value={amount}
                     onChange={handleAmountChange}
-                    className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 font-mono"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all font-mono placeholder:text-slate-600"
                     placeholder="R$ 0,00"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Categoria</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Categoria</label>
                   <select 
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
                   >
                     {(type === 'receita' ? CATEGORIAS_RECEITA : CATEGORIAS_DESPESA).map(cat => (
                       <option key={cat} value={cat} className="bg-slate-900 text-slate-200">{cat}</option>
@@ -364,22 +388,22 @@ export default function Financeiro() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Data</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Data</label>
                   <input 
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 [color-scheme:dark]"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all [color-scheme:dark]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Status</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Status</label>
                   <select 
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
-                    className="w-full bg-black/20 border border-white/10 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
                   >
                     <option value="pago" className="bg-slate-900 text-emerald-400">Pago</option>
                     <option value="pendente" className="bg-slate-900 text-amber-400">Pendente</option>
@@ -391,32 +415,32 @@ export default function Financeiro() {
                 <button
                   type="button"
                   onClick={() => setType('receita')}
-                  className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-sm font-medium transition-all ${type === 'receita' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-transparent text-slate-400'}`}
+                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 text-sm font-bold transition-all ${type === 'receita' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
                 >
-                  <Plus size={16} /> Receita
+                  <Plus size={18} /> Receita
                 </button>
                 <button
                   type="button"
                   onClick={() => setType('despesa')}
-                  className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-sm font-medium transition-all ${type === 'despesa' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-white/5 border-transparent text-slate-400'}`}
+                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 text-sm font-bold transition-all ${type === 'despesa' ? 'bg-rose-500/10 border-rose-500/50 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
                 >
-                  <Minus size={16} /> Despesa
+                  <Minus size={18} /> Despesa
                 </button>
               </div>
               
               <button 
                 type="submit"
-                className={`w-full mt-2 font-medium text-sm p-3 rounded-xl shadow-lg transition-all ${editingId ? 'bg-amber-600/90 hover:bg-amber-500 text-white shadow-amber-500/25' : 'bg-indigo-600/90 hover:bg-indigo-500 text-white shadow-indigo-500/25'}`}
+                className={`w-full mt-4 font-bold text-sm p-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${editingId ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white shadow-amber-500/25' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40'}`}
               >
-                {editingId ? 'Atualizar Transação' : 'Registrar'}
+                {editingId ? <><RefreshCw size={18}/> Atualizar Transação</> : <><Plus size={18}/> Registrar Lançamento</>}
               </button>
             </form>
           </div>
 
-          <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-xl shadow-xl h-[340px] flex flex-col">
-            <div className="flex items-center gap-2 mb-4">
-              <PieChartIcon className="text-slate-400 w-4 h-4" />
-              <h2 className="text-sm font-semibold text-slate-300">Despesas no Período</h2>
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-6 rounded-3xl backdrop-blur-xl shadow-2xl h-[360px] flex flex-col">
+            <div className="flex items-center gap-2 mb-2">
+              <PieChartIcon className="text-slate-400 w-5 h-5" />
+              <h2 className="text-base font-bold text-white">Mapa de Despesas</h2>
             </div>
             
             <div className="flex-1 w-full relative">
@@ -431,22 +455,23 @@ export default function Financeiro() {
                       data={despesasPorCategoria}
                       cx="50%"
                       cy="45%"
-                      innerRadius={60}
-                      outerRadius={80}
+                      innerRadius={75}
+                      outerRadius={95}
                       paddingAngle={4}
                       dataKey="value"
                       stroke="none"
+                      cornerRadius={6}
                     >
                       {despesasPorCategoria.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={CORES_GRAFICO[index % CORES_GRAFICO.length]} />
                       ))}
                     </Pie>
-                    <Tooltip content={<CustomTooltip />} />
+                    <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
                     <Legend 
                       verticalAlign="bottom" 
-                      height={36} 
+                      height={40} 
                       iconType="circle"
-                      formatter={(value) => <span className="text-xs text-slate-300">{value}</span>}
+                      formatter={(value) => <span className="text-[11px] font-medium text-slate-300 ml-1">{value}</span>}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -455,42 +480,48 @@ export default function Financeiro() {
           </div>
         </div>
 
-        {/* Coluna Direita: Log de Transações com Botão de Baixa Rápida */}
-        <div className="lg:col-span-2 bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-xl shadow-xl flex flex-col h-[820px]">
-          <h2 className="text-sm font-semibold text-slate-300 mb-5">Lançamentos</h2>
+        {/* Coluna Direita: Feed de Transações */}
+        <div className="lg:col-span-2 bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-7 rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col min-h-[500px] max-h-[960px]">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-bold text-white">Extrato Detalhado</h2>
+            <div className="text-xs font-semibold text-slate-400 bg-white/5 px-3 py-1 rounded-full border border-white/10">
+              {sortedTransactions.length} registros
+            </div>
+          </div>
           
-          <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 space-y-2">
+          <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
             {sortedTransactions.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-                Nenhuma transação encontrada neste período.
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
+                <Coins size={48} className="text-slate-600/50" />
+                <p className="text-sm">O extrato deste período está vazio.</p>
               </div>
             ) : (
               sortedTransactions.map((t) => {
                 const isPendente = (t.status || 'pago') === 'pendente';
+                const isReceita = t.type === 'receita';
                 
                 return (
-                  <div key={t.id} className={`flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 bg-white/5 border rounded-xl transition-colors gap-4 ${isPendente ? 'border-amber-500/20 hover:bg-amber-500/5' : 'border-white/5 hover:bg-white/10'}`}>
+                  <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 bg-black/20 border rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
                     <div className="flex items-center gap-4">
                       
-                      <button 
-                        onClick={() => toggleTransactionStatus(t.id)}
-                        title={isPendente ? "Marcar como Pago" : "Marcar como Pendente"}
-                        className={`p-2 rounded-lg shrink-0 transition-all ${isPendente ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' : t.type === 'receita' ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}
-                      >
-                        {isPendente ? <Clock size={18} /> : t.type === 'receita' ? <ArrowUpRight size={18} /> : <ArrowDownRight size={18} />}
-                      </button>
+                      {/* Ícone da Categoria Dinâmico */}
+                      <div className={`p-3 rounded-xl border flex items-center justify-center shadow-inner ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                        {getCategoryIcon(t.category)}
+                      </div>
 
                       <div>
-                        <div className="text-sm font-medium text-slate-200">{t.description}</div>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <span className="flex items-center gap-1 text-xs text-slate-500">
-                            <Calendar size={12} /> {formatDateToBR(t.date)}
+                        <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors">
+                          {t.description}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                            <Calendar size={11} /> {formatDateToBR(t.date)}
                           </span>
-                          <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10">
+                          <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10">
                             <Tag size={10} /> {t.category}
                           </span>
                           {isPendente && (
-                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
                               A Pagar
                             </span>
                           )}
@@ -498,27 +529,25 @@ export default function Financeiro() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t border-white/5 sm:border-0">
-                      <div className={`font-mono font-medium ${isPendente ? 'text-amber-400/80' : t.type === 'receita' ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {t.type === 'receita' ? '+' : '-'} R$ {t.amount.toFixed(2)}
+                    <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0">
+                      <div className={`font-mono font-bold text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
+                        {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
                       </div>
                       
-                      <div className="flex items-center gap-1">
-                        {/* Botão de Dar Baixa Rápida em Pendências */}
+                      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                         {isPendente && (
                           <button 
                             onClick={() => toggleTransactionStatus(t.id)}
-                            title="Dar Baixa (Marcar como Pago)"
-                            className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-xs font-medium transition-all"
+                            title="Dar Baixa"
+                            className="flex items-center justify-center p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
                           >
-                            <CheckCircle2 size={14} /> Pagar
+                            <CheckCircle2 size={16} />
                           </button>
                         )}
-
                         <button 
                           onClick={() => handleEdit(t)}
                           title="Editar"
-                          className="text-slate-400 hover:text-amber-400 p-2 rounded-lg hover:bg-amber-500/10 transition-all"
+                          className="text-slate-400 hover:text-indigo-400 p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
                         >
                           <Pencil size={16} />
                         </button>
