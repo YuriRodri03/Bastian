@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { 
   Wallet, Plus, Minus, ArrowUpRight, ArrowDownRight, 
   Tag, Trash2, Pencil, X, PieChart as PieChartIcon,
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
-  // Novos ícones para as categorias:
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// Categorias expandidas e refinadas
 const CATEGORIAS_RECEITA = ['Salário', 'Bolsa Acadêmica/CNPq', 'Freelance', 'Rendimentos/Investimentos', 'Restituição', 'Outros'];
 const CATEGORIAS_DESPESA = ['Alimentação', 'Moradia', 'Transporte', 'Contas Fixas', 'Saúde', 'Educação/Pesquisa', 'Assinaturas/Software', 'Lazer', 'Cartão de Crédito', 'Outros'];
 
-// Cores premium e suaves para o gráfico
 const CORES_GRAFICO = ['#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'];
 
 const MESES = [
@@ -26,7 +23,6 @@ const MESES = [
   { valor: '11', nome: 'Novembro' }, { valor: '12', nome: 'Dezembro' }
 ];
 
-// Mapeamento visual das categorias (Ícone + Cor de fundo)
 const getCategoryIcon = (category) => {
   switch (category) {
     case 'Alimentação': return <Utensils size={14} className="text-orange-400" />;
@@ -96,6 +92,9 @@ const CustomTooltip = ({ active, payload }) => {
 
 export default function Financeiro() {
   const { transactions, addTransaction, removeTransaction, updateTransaction, toggleTransactionStatus, fetchTransactions } = useFinanceStore();
+  
+  // Ref para rolar a tela até o formulário
+  const formRef = useRef(null);
 
   useEffect(() => {
     fetchTransactions();
@@ -132,21 +131,16 @@ export default function Financeiro() {
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.date) return true;
-      
       let y, m;
       if (t.date.includes('/')) {
         const parts = t.date.split('/');
-        y = parts[2];
-        m = parts[1];
+        y = parts[2]; m = parts[1];
       } else {
         const parts = t.date.split('-');
-        y = parts[0];
-        m = parts[1];
+        y = parts[0]; m = parts[1];
       }
-
       if (filterYear !== y) return false;
       if (filterMonth !== 'all' && filterMonth !== m) return false;
-      
       return true;
     });
   }, [transactions, filterMonth, filterYear]);
@@ -154,7 +148,6 @@ export default function Financeiro() {
   const { totalReceitas, totalDespesas, aPagar, saldoPeriodo } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
       const tStatus = t.status || 'pago';
-      
       if (t.type === 'receita' && tStatus === 'pago') {
         acc.totalReceitas += t.amount;
         acc.saldoPeriodo += t.amount;
@@ -218,6 +211,13 @@ export default function Financeiro() {
       setDate(t.date || getTodayFormatted());
     }
     setStatus(t.status || 'pago');
+    
+    // Ancoramento: Rola a tela suavemente para o formulário
+    setTimeout(() => {
+      if (formRef.current) {
+        formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
   };
 
   const resetForm = () => {
@@ -237,40 +237,40 @@ export default function Financeiro() {
   });
 
   return (
-    <div className="min-h-[calc(100vh-80px)] p-4 sm:p-8 font-sans flex flex-col items-center">
+    // Adicionado overflow-x-hidden e controle de largura total para evitar problemas de viewport
+    <div className="min-h-[calc(100vh-80px)] w-full px-3 py-6 sm:p-8 font-sans flex flex-col items-center overflow-x-hidden box-border max-w-[100vw]">
       
       {/* Cabeçalho com Filtros */}
-      <div className="w-full max-w-7xl mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+      <div className="w-full max-w-7xl mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-gradient-to-br from-indigo-500/20 to-purple-500/10 rounded-2xl border border-indigo-500/20 backdrop-blur-md shadow-lg shadow-indigo-500/10">
-            <Wallet className="text-indigo-400 w-7 h-7" />
+            <Wallet className="text-indigo-400 w-6 h-6 sm:w-7 sm:h-7" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Centro Financeiro</h1>
-            <p className="text-sm text-slate-400 font-medium">Gestão de Recursos e Planejamento</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Centro Financeiro</h1>
+            <p className="text-xs sm:text-sm text-slate-400 font-medium">Gestão de Recursos</p>
           </div>
         </div>
 
-        {/* Filtro de Período Modernizado */}
-        <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl">
-          <div className="pl-4 text-slate-400">
+        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl flex-wrap sm:flex-nowrap">
+          <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block">
             <Filter size={16} />
           </div>
           <select 
             value={filterMonth}
             onChange={(e) => setFilterMonth(e.target.value)}
-            className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 hover:text-white transition-colors"
+            className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 hover:text-white transition-colors"
           >
             <option value="all" className="bg-slate-900 text-slate-200">Visão Anual</option>
             {MESES.map(m => (
               <option key={m.valor} value={m.valor} className="bg-slate-900 text-slate-200">{m.nome}</option>
             ))}
           </select>
-          <div className="w-px h-6 bg-white/10"></div>
+          <div className="w-px h-5 sm:h-6 bg-white/10"></div>
           <select 
             value={filterYear}
             onChange={(e) => setFilterYear(e.target.value)}
-            className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 pr-4 hover:text-white transition-colors"
+            className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 pr-2 sm:pr-4 hover:text-white transition-colors"
           >
             {availableYears.map(year => (
               <option key={year} value={year} className="bg-slate-900 text-slate-200">{year}</option>
@@ -279,68 +279,68 @@ export default function Financeiro() {
         </div>
       </div>
 
-      {/* 4 Cards de Resumo */}
-      <div className="w-full max-w-7xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+      {/* Cards de Resumo - Compactados no mobile (grid-cols-2) */}
+      <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-8">
         
-        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
-          <div className="flex justify-between items-center mb-6 relative z-10">
-            <span className="text-sm font-semibold text-slate-400 tracking-wide uppercase">Receitas</span>
-            <div className="p-2.5 bg-emerald-500/10 rounded-xl">
-              <TrendingUp className="text-emerald-400 w-5 h-5" />
+        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">Receitas</span>
+            <div className="p-1.5 sm:p-2.5 bg-emerald-500/10 rounded-lg sm:rounded-xl shrink-0">
+              <TrendingUp className="text-emerald-400 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="font-mono text-2xl font-bold text-emerald-400 relative z-10">
+          <div className="font-mono text-base sm:text-2xl font-bold text-emerald-400 relative z-10 truncate">
             {totalReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
-          <div className="flex justify-between items-center mb-6 relative z-10">
-            <span className="text-sm font-semibold text-slate-400 tracking-wide uppercase">Despesas</span>
-            <div className="p-2.5 bg-rose-500/10 rounded-xl">
-              <TrendingDown className="text-rose-400 w-5 h-5" />
+        <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">Despesas</span>
+            <div className="p-1.5 sm:p-2.5 bg-rose-500/10 rounded-lg sm:rounded-xl shrink-0">
+              <TrendingDown className="text-rose-400 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="font-mono text-2xl font-bold text-rose-400 relative z-10">
+          <div className="font-mono text-base sm:text-2xl font-bold text-rose-400 relative z-10 truncate">
             {totalDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-amber-500/30 transition-all">
-          <div className="flex justify-between items-center mb-6 relative z-10">
-            <span className="text-sm font-semibold text-amber-200/70 tracking-wide uppercase">A Pagar</span>
-            <div className="p-2.5 bg-amber-500/20 rounded-xl">
-              <Clock className="text-amber-400 w-5 h-5" />
+        <div className="bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-amber-500/30 transition-all">
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className="text-[10px] sm:text-sm font-semibold text-amber-200/70 tracking-wide uppercase truncate mr-2">A Pagar</span>
+            <div className="p-1.5 sm:p-2.5 bg-amber-500/20 rounded-lg sm:rounded-xl shrink-0">
+              <Clock className="text-amber-400 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="font-mono text-2xl font-bold text-amber-400 relative z-10">
+          <div className="font-mono text-base sm:text-2xl font-bold text-amber-400 relative z-10 truncate">
             {aPagar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-indigo-500/20 to-transparent border border-indigo-500/30 rounded-3xl p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-indigo-500/40 transition-all">
-          <div className="flex justify-between items-center mb-6 relative z-10">
-            <span className="text-sm font-semibold text-indigo-200/70 tracking-wide uppercase">Balanço Final</span>
-            <div className="p-2.5 bg-indigo-500/20 rounded-xl">
-              <DollarSign className="text-indigo-300 w-5 h-5" />
+        <div className="bg-gradient-to-br from-indigo-500/20 to-transparent border border-indigo-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-indigo-500/40 transition-all">
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className="text-[10px] sm:text-sm font-semibold text-indigo-200/70 tracking-wide uppercase truncate mr-2">Balanço</span>
+            <div className="p-1.5 sm:p-2.5 bg-indigo-500/20 rounded-lg sm:rounded-xl shrink-0">
+              <DollarSign className="text-indigo-300 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className={`font-mono text-2xl font-bold relative z-10 ${saldoPeriodo >= 0 ? 'text-white' : 'text-rose-400'}`}>
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate ${saldoPeriodo >= 0 ? 'text-white' : 'text-rose-400'}`}>
             {saldoPeriodo >= 0 ? '+' : ''}{saldoPeriodo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
       </div>
 
-      {/* Grid Principal */}
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* Coluna Esquerda: Formulário + Gráfico Donut */}
-        <div className="lg:col-span-1 flex flex-col gap-6 sticky top-24">
+        {/* Formulário + Gráfico */}
+        <div className="lg:col-span-1 flex flex-col gap-6 sticky top-20">
           
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-7 rounded-3xl backdrop-blur-xl shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-bold text-white">
+          {/* A referência 'formRef' fica aqui para a tela rolar pra cá */}
+          <div ref={formRef} className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-7 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl scroll-mt-24">
+            <div className="flex justify-between items-center mb-5 sm:mb-6">
+              <h2 className="text-base sm:text-lg font-bold text-white">
                 {editingId ? 'Editar Transação' : 'Nova Transação'}
               </h2>
               {editingId && (
@@ -350,36 +350,38 @@ export default function Financeiro() {
               )}
             </div>
             
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Descrição</label>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Descrição</label>
+                {/* Inputs agora usam text-base no mobile para bloquear o zoom do Safari */}
                 <input 
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
                   placeholder="Ex: Aluguel, Supermercado..."
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Ajustado para grid-cols-1 no celular e 2 no Desktop para evitar esmagamento */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Valor</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Valor</label>
                   <input 
                     type="text"
                     inputMode="numeric"
                     value={amount}
                     onChange={handleAmountChange}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all font-mono placeholder:text-slate-600"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all font-mono placeholder:text-slate-600"
                     placeholder="R$ 0,00"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Categoria</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Categoria</label>
                   <select 
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
                   >
                     {(type === 'receita' ? CATEGORIAS_RECEITA : CATEGORIAS_DESPESA).map(cat => (
                       <option key={cat} value={cat} className="bg-slate-900 text-slate-200">{cat}</option>
@@ -388,22 +390,22 @@ export default function Financeiro() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Data</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Data</label>
                   <input 
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all [color-scheme:dark]"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all [color-scheme:dark]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Status</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Status</label>
                   <select 
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all cursor-pointer"
                   >
                     <option value="pago" className="bg-slate-900 text-emerald-400">Pago</option>
                     <option value="pendente" className="bg-slate-900 text-amber-400">Pendente</option>
@@ -415,37 +417,37 @@ export default function Financeiro() {
                 <button
                   type="button"
                   onClick={() => setType('receita')}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 text-sm font-bold transition-all ${type === 'receita' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
+                  className={`flex items-center justify-center gap-2 p-2.5 sm:p-3 rounded-xl border-2 text-xs sm:text-sm font-bold transition-all ${type === 'receita' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
                 >
-                  <Plus size={18} /> Receita
+                  <Plus size={16} /> Receita
                 </button>
                 <button
                   type="button"
                   onClick={() => setType('despesa')}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 text-sm font-bold transition-all ${type === 'despesa' ? 'bg-rose-500/10 border-rose-500/50 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
+                  className={`flex items-center justify-center gap-2 p-2.5 sm:p-3 rounded-xl border-2 text-xs sm:text-sm font-bold transition-all ${type === 'despesa' ? 'bg-rose-500/10 border-rose-500/50 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]' : 'bg-black/20 border-transparent text-slate-500 hover:text-slate-300 hover:bg-black/40'}`}
                 >
-                  <Minus size={18} /> Despesa
+                  <Minus size={16} /> Despesa
                 </button>
               </div>
               
               <button 
                 type="submit"
-                className={`w-full mt-4 font-bold text-sm p-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${editingId ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white shadow-amber-500/25' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40'}`}
+                className={`w-full mt-2 sm:mt-4 font-bold text-sm p-3.5 sm:p-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${editingId ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white shadow-amber-500/25' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40'}`}
               >
-                {editingId ? <><RefreshCw size={18}/> Atualizar Transação</> : <><Plus size={18}/> Registrar Lançamento</>}
+                {editingId ? <><RefreshCw size={16} className="sm:w-[18px] sm:h-[18px]"/> Atualizar</> : <><Plus size={16} className="sm:w-[18px] sm:h-[18px]"/> Registrar</>}
               </button>
             </form>
           </div>
 
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-6 rounded-3xl backdrop-blur-xl shadow-2xl h-[360px] flex flex-col">
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[300px] sm:h-[360px] flex flex-col hidden md:flex">
             <div className="flex items-center gap-2 mb-2">
-              <PieChartIcon className="text-slate-400 w-5 h-5" />
-              <h2 className="text-base font-bold text-white">Mapa de Despesas</h2>
+              <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5" />
+              <h2 className="text-sm sm:text-base font-bold text-white">Mapa de Despesas</h2>
             </div>
             
             <div className="flex-1 w-full relative">
               {despesasPorCategoria.length === 0 ? (
-                <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm text-center px-4">
+                <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs sm:text-sm text-center px-4">
                   Nenhuma despesa paga no período.
                 </div>
               ) : (
@@ -455,8 +457,8 @@ export default function Financeiro() {
                       data={despesasPorCategoria}
                       cx="50%"
                       cy="45%"
-                      innerRadius={75}
-                      outerRadius={95}
+                      innerRadius={60}
+                      outerRadius={80}
                       paddingAngle={4}
                       dataKey="value"
                       stroke="none"
@@ -471,7 +473,7 @@ export default function Financeiro() {
                       verticalAlign="bottom" 
                       height={40} 
                       iconType="circle"
-                      formatter={(value) => <span className="text-[11px] font-medium text-slate-300 ml-1">{value}</span>}
+                      formatter={(value) => <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 ml-1">{value}</span>}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -481,19 +483,19 @@ export default function Financeiro() {
         </div>
 
         {/* Coluna Direita: Feed de Transações */}
-        <div className="lg:col-span-2 bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-7 rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col min-h-[500px] max-h-[960px]">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-bold text-white">Extrato Detalhado</h2>
-            <div className="text-xs font-semibold text-slate-400 bg-white/5 px-3 py-1 rounded-full border border-white/10">
+        <div className="lg:col-span-2 bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-4 sm:p-7 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col min-h-[400px] max-h-[800px] sm:max-h-[960px]">
+          <div className="flex justify-between items-center mb-4 sm:mb-6">
+            <h2 className="text-base sm:text-lg font-bold text-white">Extrato Detalhado</h2>
+            <div className="text-[10px] sm:text-xs font-semibold text-slate-400 bg-white/5 px-2 sm:px-3 py-1 rounded-full border border-white/10">
               {sortedTransactions.length} registros
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+          <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 sm:pr-2 space-y-2.5 sm:space-y-3">
             {sortedTransactions.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
-                <Coins size={48} className="text-slate-600/50" />
-                <p className="text-sm">O extrato deste período está vazio.</p>
+                <Coins size={40} className="text-slate-600/50 sm:w-12 sm:h-12" />
+                <p className="text-xs sm:text-sm">O extrato deste período está vazio.</p>
               </div>
             ) : (
               sortedTransactions.map((t) => {
@@ -501,27 +503,26 @@ export default function Financeiro() {
                 const isReceita = t.type === 'receita';
                 
                 return (
-                  <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-4 bg-black/20 border rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
-                    <div className="flex items-center gap-4">
+                  <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
+                    <div className="flex items-center gap-3 sm:gap-4">
                       
-                      {/* Ícone da Categoria Dinâmico */}
-                      <div className={`p-3 rounded-xl border flex items-center justify-center shadow-inner ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                      <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
                         {getCategoryIcon(t.category)}
                       </div>
 
-                      <div>
-                        <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors">
+                      <div className="overflow-hidden">
+                        <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
                           {t.description}
                         </div>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400">
-                            <Calendar size={11} /> {formatDateToBR(t.date)}
+                        <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
+                          <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
+                            <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
                           </span>
-                          <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10">
-                            <Tag size={10} /> {t.category}
+                          <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[100px] sm:max-w-none">
+                            <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
                           </span>
                           {isPendente && (
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
                               A Pagar
                             </span>
                           )}
@@ -529,8 +530,8 @@ export default function Financeiro() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0">
-                      <div className={`font-mono font-bold text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-2.5 sm:mt-0 pt-2.5 sm:pt-0 border-t border-white/5 sm:border-0">
+                      <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
                         {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
                       </div>
                       
@@ -539,7 +540,7 @@ export default function Financeiro() {
                           <button 
                             onClick={() => toggleTransactionStatus(t.id)}
                             title="Dar Baixa"
-                            className="flex items-center justify-center p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
+                            className="flex items-center justify-center p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
                           >
                             <CheckCircle2 size={16} />
                           </button>
@@ -547,14 +548,14 @@ export default function Financeiro() {
                         <button 
                           onClick={() => handleEdit(t)}
                           title="Editar"
-                          className="text-slate-400 hover:text-indigo-400 p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
+                          className="text-slate-400 hover:text-indigo-400 p-1.5 sm:p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
                         >
                           <Pencil size={16} />
                         </button>
                         <button 
                           onClick={() => removeTransaction(t.id)}
                           title="Excluir"
-                          className="text-slate-400 hover:text-rose-400 p-2 rounded-lg hover:bg-rose-500/10 transition-all"
+                          className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
                         >
                           <Trash2 size={16} />
                         </button>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Activity, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, Activity, MessageSquare, Terminal } from 'lucide-react';
 import { enviarComandoParaIA } from '../services/aiService';
 import { supabase } from '../lib/supabase';
 
@@ -20,16 +20,12 @@ export default function Bastian() {
   
   const needsTouchRef = useRef(false); 
   const timeoutRef = useRef(null);
-  const commandTimeoutRef = useRef(null); // Ref para a janela de tolerância de escuta
+  const commandTimeoutRef = useRef(null); 
 
-  // Função para forçar o iPhone a pintar a tela imediatamente
   const dispararTravaDeToque = () => {
     needsTouchRef.current = true;
-    
-    // requestAnimationFrame diz ao navegador que uma animação de alta prioridade vai acontecer
     requestAnimationFrame(() => {
       setAiState('needs_touch');
-      // Ler a altura do body força o iOS a recalcular e redesenhar a tela inteira (Layout Thrashing)
       void document.body.offsetHeight; 
     });
   };
@@ -37,8 +33,6 @@ export default function Bastian() {
   const tentarReligarMicrofone = () => {
     if (!intercomRef.current) return;
     
-    // CORREÇÃO CRÍTICA: Se a trava de toque estiver armada nos bastidores,
-    // nós FORÇAMOS o painel a exibir o botão antes de abortar.
     if (needsTouchRef.current) {
       setAiState('needs_touch');
       return; 
@@ -73,7 +67,7 @@ export default function Bastian() {
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Seu navegador não suporta reconhecimento de voz contínuo.");
+      alert("Senhor, este navegador não suporta a minha rede neural de reconhecimento de voz contínuo.");
       return;
     }
 
@@ -118,9 +112,7 @@ export default function Bastian() {
       if (finalTranscript) {
         const text = finalTranscript.toLowerCase().trim();
 
-        // 1. Se o Bastian já foi ativado pela palavra-chave no chunk anterior
         if (isAwakeRef.current) {
-          // Cancela o "Sim, senhor?" porque recebemos o resto da frase!
           if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
           isAwakeRef.current = false; 
           
@@ -130,7 +122,6 @@ export default function Bastian() {
           return;
         }
 
-        // 2. Procurando a palavra-chave
         const regex = /(?:bastian|bastião|bastia)(.*)/i;
         const match = text.match(regex);
 
@@ -138,16 +129,12 @@ export default function Bastian() {
           const comando = match[1].trim();
           
           if (comando.length > 3) {
-            // O usuário falou a frase toda de uma vez em um único bloco contínuo
             executarComando(comando);
           } else {
-            // O tablet cortou a frase no meio ou o usuário falou apenas "Bastian".
-            // Vamos acordar a IA, mas aguardar um pouco antes de responder com voz.
             isAwakeRef.current = true;
             
             if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
             
-            // Espera 1.2 segundos para ver se o resto da frase chega
             commandTimeoutRef.current = setTimeout(() => {
               if (isAwakeRef.current) {
                 falar("Sim, senhor?");
@@ -171,7 +158,7 @@ export default function Bastian() {
     return () => {
       intercomRef.current = false;
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current); // Limpeza extra
+      if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
       }
@@ -220,7 +207,6 @@ export default function Bastian() {
       if (audioRef.current) {
         audioRef.current.src = audioUrl;
         
-        // Timer global invencível (mesmo que o iOS ignore os metadados)
         let watchdogTimer = null;
 
         const finalizarReproducao = () => {
@@ -232,7 +218,6 @@ export default function Bastian() {
         };
 
         audioRef.current.onplay = () => {
-          // CORREÇÃO: Só exibe "Transmitindo" se a tela não estiver bloqueada
           if (!needsTouchRef.current) setAiState('speaking');
         };
         
@@ -240,7 +225,6 @@ export default function Bastian() {
         audioRef.current.onerror = finalizarReproducao;
 
         audioRef.current.onpause = () => {
-          // CORREÇÃO: Ignora pausas que acontecem no tempo zero (buffering do iOS)
           if (isBusyRef.current && audioRef.current.currentTime > 0) finalizarReproducao();
         };
 
@@ -255,8 +239,6 @@ export default function Bastian() {
           }, duracaoMs + 2000);
         };
 
-        // GATILHO DE EMERGÊNCIA ABSOLUTA: Disparado no instante do play.
-        // Se o Safari falhar em carregar metadados, terminar, ou pausar, isso salva o sistema em 15s.
         watchdogTimer = setTimeout(() => {
           if (isBusyRef.current) finalizarReproducao();
         }, 15000);
@@ -327,7 +309,6 @@ export default function Bastian() {
       
       if (audioRef.current) {
         audioRef.current.pause();
-        // MELHORIA: Evitar zerar o src mantém a sessão de áudio "aquecida" no Safari
       }
     }
   };
@@ -336,7 +317,7 @@ export default function Bastian() {
     switch (aiState) {
       case 'listening': return 'border-cyan-400 shadow-[0_0_40px_rgba(6,182,212,0.5)]';
       case 'processing': return 'border-amber-400 shadow-[0_0_60px_rgba(251,191,36,0.6)] animate-pulse';
-      case 'speaking': return 'border-emerald-400 shadow-[0_0_80px_rgba(52,211,153,0.8)] scale-110 transition-transform duration-200';
+      case 'speaking': return 'border-emerald-400 shadow-[0_0_80px_rgba(52,211,153,0.8)] scale-110 transition-transform duration-300';
       case 'needs_touch': return 'border-cyan-500 shadow-[0_0_50px_rgba(6,182,212,0.6)] animate-bounce';
       default: return 'border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.2)] opacity-70';
     }
@@ -350,9 +331,22 @@ export default function Bastian() {
     return `animate-[spin_${baseSpeed}s_linear_infinite] border-cyan-500/50`; 
   };
 
+  const getGlowColor = () => {
+    if (aiState === 'processing') return 'radial-gradient(circle, rgba(251,191,36,0.15) 0%, transparent 60%)';
+    if (aiState === 'speaking') return 'radial-gradient(circle, rgba(52,211,153,0.15) 0%, transparent 70%)';
+    return 'radial-gradient(circle, rgba(6,182,212,0.1) 0%, transparent 50%)';
+  };
+
   return (
-    <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center relative overflow-hidden font-mono select-none p-6">
+    <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center relative overflow-x-hidden font-mono select-none p-4 sm:p-6 box-border max-w-[100vw]">
       
+      {/* Brilho de Fundo Dinâmico */}
+      <div 
+        className="absolute inset-0 z-0 pointer-events-none transition-all duration-1000 ease-in-out"
+        style={{ background: getGlowColor() }}
+      ></div>
+
+      {/* Trava de Toque (iOS Watchdog) */}
       {aiState === 'needs_touch' && (
         <div 
           onClick={() => {
@@ -362,48 +356,51 @@ export default function Bastian() {
             }
             tentarReligarMicrofone();
           }}
-          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md cursor-pointer animate-in fade-in duration-300"
+          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md cursor-pointer animate-in fade-in duration-300 px-4"
         >
-          <div className="flex flex-col items-center gap-4 p-8 bg-cyan-950/40 border border-cyan-500/30 rounded-3xl shadow-[0_0_50px_rgba(6,182,212,0.2)]">
-            <div className="w-24 h-24 bg-cyan-500/20 rounded-full flex items-center justify-center animate-ping absolute"></div>
-            <Mic size={56} className="text-cyan-400 relative z-10 animate-pulse" />
-            <h2 className="text-2xl font-bold text-white tracking-widest uppercase text-center relative z-10 mt-4">
-              Toque para Continuar
+          <div className="flex flex-col items-center gap-4 p-8 w-full max-w-sm bg-cyan-950/40 border border-cyan-500/30 rounded-3xl shadow-[0_0_50px_rgba(6,182,212,0.2)] text-center">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 bg-cyan-500/20 rounded-full flex items-center justify-center animate-ping absolute"></div>
+            <Mic size={48} className="text-cyan-400 relative z-10 animate-pulse sm:w-14 sm:h-14" />
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-widest uppercase relative z-10 mt-4">
+              Toque na Tela
             </h2>
-            <p className="text-cyan-400/80 text-sm text-center relative z-10 max-w-xs mt-2">
-              Toque em qualquer lugar da tela para manter o canal de voz aberto.
+            <p className="text-cyan-400/80 text-xs sm:text-sm relative z-10 max-w-xs mt-1">
+              O sistema de áudio foi suspenso. Toque para reabrir o canal de voz.
             </p>
           </div>
         </div>
       )}
 
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#06b6d405_1px,transparent_1px),linear-gradient(to_bottom,#06b6d405_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
+      {/* Grid Tecnológico */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#06b6d405_1px,transparent_1px),linear-gradient(to_bottom,#06b6d405_1px,transparent_1px)] bg-[size:3rem_3rem] sm:bg-[size:4rem_4rem] z-0 pointer-events-none"></div>
       
-      <div className="relative z-10 flex flex-col items-center mb-12">
-        <div className="relative flex items-center justify-center w-80 h-80 transition-all duration-500">
+      {/* Bastian Core UI */}
+      <div className="relative z-10 flex flex-col items-center mb-8 sm:mb-12 mt-4 sm:mt-0 w-full">
+        {/* Usando tamanhos fixos porém responsivos w-[280px] mobile, w-[320px] desktop */}
+        <div className="relative flex items-center justify-center w-[280px] h-[280px] sm:w-[320px] sm:h-[320px] transition-all duration-500">
           <div className={`absolute inset-0 border-[1px] border-t-current rounded-full ${getRingStyles(4)}`}></div>
-          <div className={`absolute inset-4 border-[1px] border-b-current rounded-full ${getRingStyles(6)}`} style={{ animationDirection: 'reverse' }}></div>
-          <div className={`absolute inset-10 border-[2px] border-dashed rounded-full ${getRingStyles(8)}`}></div>
-          <div className={`absolute inset-20 border-2 border-l-current border-r-current rounded-full ${getRingStyles(3)}`} style={{ animationDirection: 'reverse' }}></div>
+          <div className={`absolute inset-[6%] border-[1px] border-b-current rounded-full ${getRingStyles(6)}`} style={{ animationDirection: 'reverse' }}></div>
+          <div className={`absolute inset-[15%] border-[2px] border-dashed rounded-full ${getRingStyles(8)}`}></div>
+          <div className={`absolute inset-[25%] border-2 border-l-current border-r-current rounded-full ${getRingStyles(3)}`} style={{ animationDirection: 'reverse' }}></div>
           
-          <div className={`w-24 h-24 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-md border-2 transition-all duration-300 ${getCoreStyles()}`}>
-            <div className={`w-6 h-6 rounded-full ${aiState === 'processing' ? 'bg-amber-300 animate-ping' : aiState === 'speaking' ? 'bg-emerald-300 animate-bounce' : 'bg-cyan-300 animate-pulse'}`}></div>
-            <div className="absolute w-3 h-3 bg-white rounded-full"></div>
+          <div className={`w-20 h-20 sm:w-24 sm:h-24 bg-black/50 rounded-full flex items-center justify-center backdrop-blur-md border-2 transition-all duration-300 ${getCoreStyles()}`}>
+            <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full ${aiState === 'processing' ? 'bg-amber-300 animate-ping' : aiState === 'speaking' ? 'bg-emerald-300 animate-bounce' : 'bg-cyan-300 animate-pulse'}`}></div>
+            <div className="absolute w-2.5 h-2.5 sm:w-3 sm:h-3 bg-white rounded-full"></div>
           </div>
         </div>
 
-        <div className="mt-8 text-center flex flex-col items-center gap-2">
-          <h1 className="text-white text-3xl font-bold tracking-[0.3em] uppercase drop-shadow-lg">
-            BASTIAN <span className="text-cyan-500 text-lg">CORE</span>
+        <div className="mt-8 sm:mt-10 text-center flex flex-col items-center gap-1.5 sm:gap-2">
+          <h1 className="text-white text-2xl sm:text-3xl font-bold tracking-[0.3em] sm:tracking-[0.4em] uppercase drop-shadow-lg ml-1 sm:ml-2">
+            BASTIAN <span className="text-cyan-500 text-base sm:text-lg">CORE</span>
           </h1>
-          <p className={`text-xs tracking-widest uppercase font-semibold ${
+          <p className={`text-[10px] sm:text-xs tracking-widest uppercase font-semibold h-4 transition-colors duration-300 ${
             aiState === 'listening' ? 'text-cyan-400 animate-pulse' :
             aiState === 'starting' ? 'text-cyan-200' :
             aiState === 'needs_touch' ? 'text-cyan-400 animate-bounce' :
             aiState === 'processing' ? 'text-amber-400 animate-pulse' :
             aiState === 'speaking' ? 'text-emerald-400' : 'text-slate-500'
           }`}>
-            {aiState === 'listening' ? 'Aguardando palavra-chave "Bastian"...' :
+            {aiState === 'listening' ? 'Aguardando comando...' :
              aiState === 'starting' ? 'Reativando sensores...' :
              aiState === 'needs_touch' ? 'Aguardando toque na tela...' :
              aiState === 'processing' ? 'Processando rede neural...' :
@@ -412,42 +409,59 @@ export default function Bastian() {
         </div>
       </div>
 
-      <div className="relative z-10 w-full max-w-2xl bg-black/40 border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-2xl flex flex-col gap-6">
-        <div className="h-20 bg-black/50 rounded-xl border border-white/5 p-4 flex items-center justify-center text-center overflow-hidden">
+      {/* Painel Inferior (HUD & Controles) */}
+      <div className="relative z-10 w-full max-w-2xl bg-gradient-to-b from-white/10 to-white/5 border border-white/10 rounded-[2rem] p-5 sm:p-7 backdrop-blur-xl shadow-2xl flex flex-col gap-5 sm:gap-6">
+        
+        {/* Visor de Transcrição */}
+        <div className="h-16 sm:h-20 bg-black/40 rounded-xl sm:rounded-2xl border border-white/5 p-3 sm:p-4 flex items-center justify-center text-center overflow-hidden shadow-inner relative">
+          <Terminal size={14} className="absolute top-3 left-3 text-slate-600 hidden sm:block" />
           {transcript ? (
-            <p className="text-slate-300 italic text-sm">"{transcript}"</p>
+            <p className="text-slate-200 italic text-xs sm:text-sm font-semibold tracking-wide">"{transcript}"</p>
           ) : (
-            <p className="text-slate-600 text-xs flex items-center gap-2">
+            <p className="text-slate-500 text-[10px] sm:text-xs font-semibold flex items-center gap-2 uppercase tracking-wider">
               <Activity size={14} className={isIntercomActive ? "animate-pulse text-cyan-500" : ""} />
-              {isIntercomActive ? "Fale 'Bastian' seguido do seu comando." : "Ative o intercomunicador para iniciar."}
+              {isIntercomActive ? "Fale 'Bastian' seguido do seu comando." : "Intercomunicador Off-line"}
             </p>
           )}
         </div>
 
+        {/* Botão de Ignição */}
         <button 
           onClick={toggleIntercom}
-          className={`w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-wider transition-all duration-300 shadow-xl ${
+          className={`w-full py-3.5 sm:py-4 rounded-xl sm:rounded-2xl flex items-center justify-center gap-3 font-bold text-xs sm:text-sm uppercase tracking-widest transition-all duration-300 shadow-xl border ${
             isIntercomActive 
-              ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 shadow-rose-500/10' 
-              : 'bg-cyan-600 text-white hover:bg-cyan-500 border border-transparent shadow-cyan-500/25'
+              ? 'bg-rose-950/80 text-rose-400 border-rose-500/30 hover:bg-rose-900 shadow-rose-500/10' 
+              : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 border-cyan-500/50 shadow-cyan-500/25'
           }`}
         >
-          {isIntercomActive ? <><MicOff size={20} /> Desativar Bastian</> : <><Mic size={20} /> Ativar Intercomunicador</>}
+          {isIntercomActive ? <><MicOff size={18} /> Desativar Bastian</> : <><Mic size={18} /> Ativar Intercomunicador</>}
         </button>
 
+        {/* HUD de Histórico de Conversa */}
         {chatLog.length > 0 && (
-          <div className="border-t border-white/10 pt-4 mt-2 max-h-40 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-            {chatLog.slice(-3).map((chat, idx) => (
-              <div key={idx} className={`flex items-start gap-3 text-xs ${chat.role === 'user' ? 'text-slate-400' : 'text-cyan-300'}`}>
-                {chat.role === 'bastian' ? <Activity size={14} className="mt-0.5 shrink-0" /> : <MessageSquare size={14} className="mt-0.5 shrink-0 opacity-50" />}
-                <p className="leading-relaxed font-sans">{chat.text}</p>
-              </div>
-            ))}
+          <div className="border-t border-white/10 pt-5 mt-1 sm:mt-2 flex flex-col gap-3 sm:gap-4 max-h-[160px] overflow-y-auto custom-scrollbar pr-2">
+            {chatLog.slice(-4).map((chat, idx) => {
+              const isBastian = chat.role === 'bastian';
+              return (
+                <div key={idx} className={`flex items-start gap-3 w-full animate-in fade-in slide-in-from-bottom-2 ${isBastian ? 'flex-row' : 'flex-row-reverse'}`}>
+                  
+                  <div className={`flex items-center justify-center w-6 h-6 sm:w-8 sm:h-8 rounded-full shrink-0 border ${isBastian ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                    {isBastian ? <Activity size={12} className="sm:w-4 sm:h-4" /> : <MessageSquare size={12} className="sm:w-4 sm:h-4" />}
+                  </div>
+                  
+                  <div className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl max-w-[85%] sm:max-w-[80%] ${isBastian ? 'bg-cyan-500/10 border border-cyan-500/20 text-cyan-100 rounded-tl-sm' : 'bg-white/5 border border-white/10 text-slate-300 rounded-tr-sm'}`}>
+                    <p className="text-[11px] sm:text-xs font-sans leading-relaxed">
+                      {chat.text}
+                    </p>
+                  </div>
+                  
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
       
-      {/* MELHORIA: Atributos 'playsInline' e 'webkit-playsinline' evitam conflitos de mídia no iOS */}
       <audio ref={audioRef} style={{ display: 'none' }} playsInline webkit-playsinline="true" preload="auto" />
     </div>
   );
