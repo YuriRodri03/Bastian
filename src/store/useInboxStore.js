@@ -20,13 +20,18 @@ export const useInboxStore = create((set) => ({
     set({ isLoading: false });
   },
 
-  addInboxTask: async (title) => {
+  // MODIFICADO: Agora recebe a string de data enviada pelo seu calendário
+  addInboxTask: async (title, dateString = null) => {
     if (!title.trim()) return;
     const { data: userData } = await supabase.auth.getUser();
     
+    // NOVO: Captura a data selecionada ou usa o dia de hoje por padrão
+    const taskDate = dateString || new Date().toISOString().split('T')[0];
+    
     const { data, error } = await supabase
       .from('inbox_tasks')
-      .insert([{ title, user_id: userData.user.id }])
+      // NOVO: Salva a coluna 'date' no Supabase
+      .insert([{ title, user_id: userData.user.id, date: taskDate }])
       .select()
       .single();
 

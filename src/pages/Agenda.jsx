@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAgendaStore } from '../store/useAgendaStore';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { useKanbanStore } from '../store/useKanbanStore';
@@ -30,15 +30,23 @@ export default function Agenda() {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const nextPeriod = () => {
-    if (calendarMode === 'month') setCurrentDate(addMonths(currentDate, 1));
-    else if (calendarMode === 'week') setCurrentDate(addWeeks(currentDate, 1));
-    else setCurrentDate(addDays(currentDate, 1));
+    if (activeTab === 'inbox' || calendarMode === 'day') {
+      setCurrentDate(addDays(currentDate, 1));
+    } else if (calendarMode === 'week') {
+      setCurrentDate(addWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(addMonths(currentDate, 1));
+    }
   };
 
   const prevPeriod = () => {
-    if (calendarMode === 'month') setCurrentDate(subMonths(currentDate, 1));
-    else if (calendarMode === 'week') setCurrentDate(subWeeks(currentDate, 1));
-    else setCurrentDate(subDays(currentDate, 1));
+    if (activeTab === 'inbox' || calendarMode === 'day') {
+      setCurrentDate(subDays(currentDate, 1));
+    } else if (calendarMode === 'week') {
+      setCurrentDate(subWeeks(currentDate, 1));
+    } else {
+      setCurrentDate(subMonths(currentDate, 1));
+    }
   };
 
   const goToToday = () => setCurrentDate(new Date());
@@ -79,6 +87,20 @@ export default function Agenda() {
     fetchKanbanTasks();
     fetchInboxTasks();
   }, [fetchAgendaItems, fetchTransactions, fetchKanbanTasks, fetchInboxTasks]);
+
+  // LÓGICA DO INBOX DIÁRIO INTEGRADO À DATA
+  const currentSelectedDateString = format(currentDate, 'yyyy-MM-dd');
+  
+  const tarefasDoDiaSelecionado = useMemo(() => {
+    return inboxTasks.filter(t => !t.date || t.date === currentSelectedDateString);
+  }, [inboxTasks, currentSelectedDateString]);
+
+  const handleAddInboxTaskWithDate = (e) => {
+    e.preventDefault();
+    if (!newInboxTitle.trim()) return;
+    addInboxTask(newInboxTitle, currentSelectedDateString); 
+    setNewInboxTitle('');
+  };
 
   const handleAddSubmit = async (e) => {
     e.preventDefault();
@@ -129,7 +151,7 @@ export default function Agenda() {
           </div>
         </div>
 
-        {/* Menu de Abas Segmentado (Estilo iOS) */}
+        {/* Menu de Abas Segmentado */}
         <div className="flex items-center bg-black/40 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-inner overflow-x-auto custom-scrollbar w-full sm:w-auto shrink-0">
           <button onClick={() => setActiveTab('calendar')} className={`flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'calendar' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
             <CalendarIcon size={16} /> <span className="sm:inline">Calendário</span>
@@ -145,38 +167,62 @@ export default function Agenda() {
 
       <main className="w-full max-w-7xl flex-1 flex flex-col">
         
-        {/* ================= ABA 1: CALENDÁRIO ================= */}
-        {activeTab === 'calendar' && (
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col flex-1 overflow-hidden min-h-[600px] sm:min-h-[750px]">
-            
-            <div className="p-4 sm:p-5 border-b border-white/10 flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20">
-              <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-5 w-full md:w-auto">
-                <h2 className="text-lg sm:text-xl font-bold text-white capitalize text-center sm:text-left min-w-[200px]">
-                  {renderHeaderTitle()}
-                </h2>
-                <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/5">
-                  <button onClick={prevPeriod} className="p-2 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"><ChevronLeft size={18} /></button>
-                  <button onClick={goToToday} className="px-4 py-1.5 text-xs font-bold bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors">Hoje</button>
-                  <button onClick={nextPeriod} className="p-2 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"><ChevronRight size={18} /></button>
-                </div>
-              </div>
+        {/* ================= NAVEGAÇÃO DE DATA GLOBAL COM CONSCIÊNCIA DE CONTEXTO ================= */}
+        {(activeTab === 'calendar' || activeTab === 'inbox') && (
+          <div className="w-full flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20 p-4 sm:p-5 border border-white/10 rounded-t-2xl sm:rounded-t-3xl transition-all">
+            <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-5 w-full md:w-auto">
+              
+              {/* Título dinâmico baseado na aba */}
+              <h2 className="text-lg sm:text-xl font-bold text-white capitalize text-center sm:text-left min-w-[200px] flex items-center justify-center sm:justify-start gap-2">
+                {activeTab === 'inbox' ? <><CheckSquare size={20} className="text-cyan-400"/> Tarefas do Dia</> : renderHeaderTitle()}
+              </h2>
+              
+              <div className="flex items-center justify-center gap-2 bg-white/5 p-1 rounded-xl border border-white/5 w-full sm:w-auto">
+                <button onClick={prevPeriod} className="p-2 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"><ChevronLeft size={18} /></button>
+                
+                {/* Mostra o dia exato no seletor apenas na aba Inbox */}
+                {activeTab === 'inbox' && (
+                  <span className="px-3 py-1 text-sm font-bold text-cyan-300 capitalize min-w-[90px] text-center tracking-wide">
+                    {format(currentDate, "dd MMM", { locale: ptBR })}
+                  </span>
+                )}
 
-              <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
-                <select 
-                  value={calendarMode}
-                  onChange={(e) => setCalendarMode(e.target.value)}
-                  className="bg-black/40 text-xs sm:text-sm font-bold text-slate-200 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
-                >
-                  <option value="month" className="bg-slate-900">Mensal</option>
-                  <option value="week" className="bg-slate-900">Semanal</option>
-                  <option value="day" className="bg-slate-900">Diário</option>
-                </select>
-                <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-cyan-500/25 shrink-0">
-                  <Plus size={16} /> <span className="hidden sm:inline">Novo Evento</span><span className="sm:hidden">Novo</span>
-                </button>
+                <button onClick={goToToday} className="px-4 py-1.5 text-xs font-bold bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors">Hoje</button>
+                <button onClick={nextPeriod} className="p-2 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"><ChevronRight size={18} /></button>
               </div>
             </div>
 
+            <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
+              {/* Interface do Calendário */}
+              {activeTab === 'calendar' ? (
+                <>
+                  <select 
+                    value={calendarMode}
+                    onChange={(e) => setCalendarMode(e.target.value)}
+                    className="bg-black/40 text-xs sm:text-sm font-bold text-slate-200 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                  >
+                    <option value="month" className="bg-slate-900">Mensal</option>
+                    <option value="week" className="bg-slate-900">Semanal</option>
+                    <option value="day" className="bg-slate-900">Diário</option>
+                  </select>
+                  <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-cyan-500/25 shrink-0 w-full sm:w-auto">
+                    <Plus size={16} /> Novo Evento
+                  </button>
+                </>
+              ) : (
+                /* Interface do Inbox */
+                <span className="text-xs font-bold text-slate-400 bg-black/40 px-4 py-2 rounded-xl border border-white/5 w-full sm:w-auto text-center flex items-center justify-center gap-2">
+                  <ListTodo size={14} className="text-cyan-500" />
+                  {tarefasDoDiaSelecionado.filter(t => !t.completed).length} pendentes
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ================= ABA 1: CALENDÁRIO ================= */}
+        {activeTab === 'calendar' && (
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 rounded-b-2xl sm:rounded-b-3xl border-t-0 backdrop-blur-xl shadow-2xl flex flex-col flex-1 overflow-hidden min-h-[500px] sm:min-h-[650px]">
             <div className={`flex-1 grid bg-black/20 overflow-y-auto ${calendarMode === 'day' ? 'grid-cols-1' : 'grid-cols-7'}`}>
               
               {calendarMode !== 'day' && ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(dia => (
@@ -192,7 +238,9 @@ export default function Agenda() {
                 
                 const eventosDoDia = agendaItems?.filter(item => item.date === dataString) || [];
                 const transacoesDoDia = transactions?.filter(t => t.date === dataString) || [];
-                const totalItens = eventosDoDia.length + transacoesDoDia.length;
+                const tarefasDoDia = inboxTasks?.filter(t => t.date === dataString && !t.completed) || [];
+                
+                const totalItens = eventosDoDia.length + transacoesDoDia.length + tarefasDoDia.length;
 
                 return (
                   <div 
@@ -243,6 +291,13 @@ export default function Agenda() {
                           <span className="truncate">{evento.title}</span>
                         </div>
                       ))}
+                      
+                      {(calendarMode === 'week' || calendarMode === 'day') && tarefasDoDia.length > 0 && (
+                        <div className="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-indigo-500/15 border-l-2 border-indigo-500 text-indigo-300 text-[9px] sm:text-[10px] font-bold rounded overflow-hidden flex items-center gap-1 mt-1">
+                          <CheckSquare size={10} className="shrink-0" />
+                          <span className="truncate">{tarefasDoDia.length} tarefas pendentes</span>
+                        </div>
+                      )}
                     </div>
 
                     {calendarMode === 'month' && totalItens > 0 && (
@@ -259,65 +314,57 @@ export default function Agenda() {
           </div>
         )}
 
-        {/* ================= ABA 2: INBOX DIÁRIO ================= */}
+        {/* ================= ABA 2: INBOX DIÁRIO (VINCULADO À DATA) ================= */}
         {activeTab === 'inbox' && (
-          <div className="max-w-4xl mx-auto w-full bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-8 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col h-[700px]">
-            <div className="flex items-center justify-between mb-6 sm:mb-8 border-b border-white/10 pb-4">
-              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <CheckSquare size={20} className="text-cyan-400" /> Tarefas Rápidas
-              </h2>
-              <span className="text-xs font-bold text-slate-400 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5">
-                {inboxTasks.filter(t => !t.completed).length} pendentes
-              </span>
-            </div>
-            
-            <form onSubmit={(e) => { e.preventDefault(); addInboxTask(newInboxTitle); setNewInboxTitle(''); }} className="flex flex-col sm:flex-row gap-3 mb-6 sm:mb-8">
-              <input 
-                type="text" 
-                value={newInboxTitle} 
-                onChange={(e) => setNewInboxTitle(e.target.value)}
-                placeholder="Ex: Pagar boleto da internet..."
-                // text-base bloqueia o zoom no iOS
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl p-3.5 sm:p-4 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all placeholder:text-slate-600"
-              />
-              <button type="submit" disabled={!newInboxTitle.trim()} className="px-6 py-3.5 sm:py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white rounded-xl shadow-lg shadow-cyan-500/25 transition-all font-bold text-sm flex items-center justify-center gap-2">
-                <Plus size={18} /> <span className="sm:hidden lg:inline">Adicionar</span>
-              </button>
-            </form>
+          <div className="w-full bg-gradient-to-b from-white/10 to-white/5 border border-white/10 border-t-0 p-5 sm:p-8 rounded-b-2xl sm:rounded-b-3xl backdrop-blur-xl shadow-2xl flex flex-col min-h-[500px] h-[700px]">
+            <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+              <form onSubmit={handleAddInboxTaskWithDate} className="flex flex-col sm:flex-row gap-3 mb-6 sm:mb-8 mt-2">
+                <input 
+                  type="text" 
+                  value={newInboxTitle} 
+                  onChange={(e) => setNewInboxTitle(e.target.value)}
+                  placeholder="Ex: Ligar para o orientador..."
+                  className="flex-1 bg-black/40 border border-white/10 rounded-xl p-3.5 sm:p-4 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all placeholder:text-slate-600 shadow-inner"
+                />
+                <button type="submit" disabled={!newInboxTitle.trim()} className="px-6 py-3.5 sm:py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white rounded-xl shadow-lg shadow-cyan-500/25 transition-all font-bold text-sm flex items-center justify-center gap-2">
+                  <Plus size={18} /> <span className="sm:hidden lg:inline">Adicionar à Lista</span>
+                </button>
+              </form>
 
-            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
-              {inboxTasks.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
-                  <div className="p-4 bg-black/20 rounded-full border border-white/5">
-                    <CheckSquare size={32} className="opacity-40" />
+              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+                {tarefasDoDiaSelecionado.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4 mt-8">
+                    <div className="p-5 bg-black/20 rounded-full border border-white/5">
+                      <CheckSquare size={40} className="opacity-40 text-cyan-500/50" />
+                    </div>
+                    <p className="text-sm font-medium">Nenhuma tarefa programada para este dia.</p>
                   </div>
-                  <p className="text-sm font-medium">Tudo limpo! Nenhuma tarefa pendente.</p>
-                </div>
-              ) : (
-                inboxTasks.map(task => (
-                  <div key={task.id} className={`group flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 ${task.completed ? 'bg-black/20 border-white/5 opacity-60' : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10 shadow-lg'}`}>
-                    <input 
-                      type="checkbox" 
-                      checked={task.completed} 
-                      onChange={() => toggleInboxTask(task.id, task.completed)}
-                      className="w-5 h-5 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-slate-900 cursor-pointer shrink-0 transition-colors"
-                    />
-                    <span className={`flex-1 text-sm sm:text-base font-medium truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                      {task.title}
-                    </span>
-                    <button onClick={() => deleteInboxTask(task.id)} className="text-slate-500 hover:text-rose-400 p-2 rounded-lg hover:bg-rose-500/10 transition-colors opacity-100 sm:opacity-0 group-hover:opacity-100">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                ))
-              )}
+                ) : (
+                  tarefasDoDiaSelecionado.map(task => (
+                    <div key={task.id} className={`group flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 ${task.completed ? 'bg-black/20 border-white/5 opacity-60' : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10 shadow-lg'}`}>
+                      <input 
+                        type="checkbox" 
+                        checked={task.completed} 
+                        onChange={() => toggleInboxTask(task.id, task.completed)}
+                        className="w-5 h-5 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-slate-900 cursor-pointer shrink-0 transition-colors"
+                      />
+                      <span className={`flex-1 text-sm sm:text-base font-medium truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                        {task.title}
+                      </span>
+                      <button onClick={() => deleteInboxTask(task.id)} className="text-slate-500 hover:text-rose-400 p-2 rounded-lg hover:bg-rose-500/10 transition-colors opacity-100 sm:opacity-0 group-hover:opacity-100">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
 
         {/* ================= ABA 3: KANBAN ================= */}
         {activeTab === 'projects' && (
-          <div className="h-[700px] flex gap-5 sm:gap-6 overflow-x-auto pb-4 custom-scrollbar snap-x snap-mandatory">
+          <div className="h-[700px] flex gap-5 sm:gap-6 overflow-x-auto pb-4 custom-scrollbar snap-x snap-mandatory mt-6">
             {[
               { id: 'backlog', label: 'Backlog', color: 'bg-slate-400', border: 'border-slate-400/30' },
               { id: 'in-progress', label: 'Em Andamento', color: 'bg-cyan-400', border: 'border-cyan-400/30' },
@@ -489,7 +536,7 @@ export default function Agenda() {
         </div>
       )}
 
-      {/* ================= MODAL DE FORMULÁRIO (CRIAR E EDITAR) ================= */}
+      {/* ================= MODAL DE FORMULÁRIO (CRIAR E EDITAR EVENTOS) ================= */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-white/10 p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-2xl">
@@ -503,7 +550,6 @@ export default function Agenda() {
             <form onSubmit={handleAddSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Título</label>
-                {/* text-base previne o zoom no iOS */}
                 <input required type="text" value={newItem.title} onChange={(e) => setNewItem({...newItem, title: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 placeholder:text-slate-600 transition-all" placeholder="Ex: Reunião de Projeto" />
               </div>
               <div className="grid grid-cols-2 gap-4">
