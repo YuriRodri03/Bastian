@@ -118,7 +118,8 @@ export default function Treino() {
   };
 
   const handleConcluirTreino = (ficha) => {
-    const resumoExercicios = ficha.exercicios.map(e => `${e.nome} (${e.series} ${e.reps} - ${e.carga})`).join(' | ');
+    // Trocado o ' | ' por ' • ' para um design mais limpo
+    const resumoExercicios = ficha.exercicios.map(e => `${e.nome} (${e.series} ${e.reps} - ${e.carga})`).join(' • ');
     addHealthLog('treino', `${ficha.title}: ${resumoExercicios}`, 60, 'min');
     showToast(`Treino "${ficha.title}" concluído com sucesso!`, 'success');
   };
@@ -133,6 +134,10 @@ export default function Treino() {
       carga: novoExercicioCarga 
     }]);
     setNovoExercicioNome('');
+  };
+
+  const handleRemoveExercicioTemp = (idToRemove) => {
+    setExerciciosTemp(exerciciosTemp.filter(ex => ex.id !== idToRemove));
   };
 
   const handleSaveNovaFicha = (e) => {
@@ -169,7 +174,7 @@ export default function Treino() {
   const handleDeleteFicha = (id) => {
     if (window.confirm('Senhor, deseja excluir esta ficha permanentemente?')) {
       setFichasTreino(fichasTreino.filter(f => f.id !== id));
-      showToast('Ficha excluída.', 'success');
+      showToast('Ficha excluída com sucesso.', 'success');
     }
   };
 
@@ -265,8 +270,7 @@ export default function Treino() {
                         value={data.valor}
                         onChange={(e) => handleMedidaChange(medidaNome, e.target.value)}
                         placeholder={`Ex: ${ultimaGravada ? ultimaGravada.value : '00'}`}
-                        // text-base impede o zoom do iOS
-                        className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 sm:p-2.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 font-mono text-center transition-all placeholder:text-slate-600"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 sm:p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 font-mono text-center transition-all placeholder:text-slate-600"
                       />
                       <button 
                         onClick={() => handleSaveMedida(medidaNome)}
@@ -317,7 +321,7 @@ export default function Treino() {
                       type="text" 
                       value={novoExercicioNome} 
                       onChange={(e) => setNovoExercicioNome(e.target.value)} 
-                      placeholder="Nome do Exercício (ex: Agachamento)" 
+                      placeholder="Nome do Exercício" 
                       className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 placeholder:text-slate-600" 
                     />
                     <div className="grid grid-cols-3 gap-2">
@@ -325,17 +329,22 @@ export default function Treino() {
                       <input type="text" value={novoExercicioReps} onChange={(e) => setNovoExercicioReps(e.target.value)} placeholder="Reps" className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-center text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 placeholder:text-slate-600" />
                       <input type="text" value={novoExercicioCarga} onChange={(e) => setNovoExercicioCarga(e.target.value)} placeholder="Carga" className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-center font-mono text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 placeholder:text-slate-600" />
                     </div>
-                    <button type="button" onClick={handleAddExercicioTemp} className="py-2.5 mt-1 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs sm:text-sm font-bold border border-white/10 transition-all flex justify-center items-center gap-1">
+                    <button type="button" onClick={handleAddExercicioTemp} className="py-3 mt-1 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs sm:text-sm font-bold border border-white/10 transition-all flex justify-center items-center gap-1.5">
                       <Plus size={16}/> Incluir na lista
                     </button>
                   </div>
 
                   {exerciciosTemp.length > 0 && (
-                    <div className="bg-black/30 p-2 sm:p-3 rounded-xl space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar border border-white/5">
-                      {exerciciosTemp.map((ex, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-[11px] sm:text-xs text-slate-300 px-3 py-2 bg-white/5 rounded-lg border border-white/5">
-                          <span className="font-semibold truncate pr-2">{ex.nome} <span className="opacity-60 ml-1 font-mono">({ex.series} {ex.reps})</span></span>
-                          <span className="font-mono font-bold text-cyan-400 bg-cyan-950/50 px-2 py-0.5 rounded shrink-0">{ex.carga}</span>
+                    <div className="bg-black/30 p-2 sm:p-3 rounded-xl space-y-2 max-h-48 overflow-y-auto custom-scrollbar border border-white/5">
+                      {exerciciosTemp.map((ex) => (
+                        <div key={ex.id} className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] sm:text-xs text-slate-300 px-3 py-2.5 bg-white/5 rounded-lg border border-white/5 gap-2">
+                          <span className="font-semibold truncate flex-1">{ex.nome} <span className="opacity-60 ml-1 font-mono">({ex.series} {ex.reps})</span></span>
+                          <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                            <span className="font-mono font-bold text-cyan-400 bg-cyan-950/50 px-2 py-0.5 rounded shrink-0">{ex.carga}</span>
+                            <button type="button" onClick={() => handleRemoveExercicioTemp(ex.id)} className="p-1.5 text-rose-400 hover:bg-rose-500/20 rounded-md transition-colors" title="Remover">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -349,7 +358,7 @@ export default function Treino() {
               </form>
             )}
 
-            {/* LISTA DE FICHAS COM SUPORTE A EDIÇÃO COMPLETA */}
+            {/* LISTA DE FICHAS */}
             <div className="space-y-3 sm:space-y-4">
               {fichasTreino.map(ficha => {
                 const isExpanded = expandedFichaId === ficha.id;
@@ -358,14 +367,14 @@ export default function Treino() {
                 return (
                   <div key={ficha.id} className={`bg-black/30 border rounded-2xl transition-all duration-200 ${isExpanded ? 'border-cyan-500/30 shadow-lg shadow-cyan-500/5' : 'border-white/10 hover:border-white/20 hover:bg-black/40'}`}>
                     
-                    <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                    <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                       <div className="cursor-pointer flex-1" onClick={() => !isEditing && setExpandedFichaId(isExpanded ? null : ficha.id)}>
                         {isEditing ? (
                           <input 
                             type="text" 
                             value={editFichaTitulo} 
                             onChange={(e) => setEditFichaTitulo(e.target.value)} 
-                            className="bg-black/60 border border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30 rounded-xl px-3 py-2 text-base sm:text-sm text-white w-full font-bold focus:outline-none transition-all placeholder:text-slate-600"
+                            className="bg-black/60 border border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/30 rounded-xl px-3 py-2.5 text-base sm:text-sm text-white w-full font-bold focus:outline-none transition-all placeholder:text-slate-600"
                           />
                         ) : (
                           <div>
@@ -381,21 +390,21 @@ export default function Treino() {
                       <div className="flex items-center justify-between sm:justify-end gap-2 border-t border-white/5 sm:border-0 pt-3 sm:pt-0">
                         {!isEditing ? (
                           <>
-                            <button onClick={() => handleConcluirTreino(ficha)} title="Concluir treino hoje" className="px-4 py-2 sm:py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all w-full sm:w-auto">
-                              <Play size={14} fill="currentColor" /> Concluir
+                            <button onClick={() => handleConcluirTreino(ficha)} title="Concluir treino hoje" className="px-4 py-2 sm:py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all w-full sm:w-auto">
+                              <Play size={16} fill="currentColor" /> Concluir
                             </button>
-                            <div className="flex gap-1 shrink-0">
-                              <button onClick={() => handleStartEdit(ficha)} title="Editar Ficha" className="text-slate-400 hover:text-cyan-400 p-2 sm:p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-transparent hover:border-cyan-500/20">
-                                <Edit3 size={16} />
+                            <div className="flex gap-1.5 shrink-0 ml-2 sm:ml-0">
+                              <button onClick={() => handleStartEdit(ficha)} title="Editar Ficha" className="text-slate-400 hover:text-cyan-400 p-2.5 sm:p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-transparent hover:border-cyan-500/20">
+                                <Edit3 size={18} className="sm:w-4 sm:h-4" />
                               </button>
-                              <button onClick={() => handleDeleteFicha(ficha.id)} title="Excluir Ficha" className="text-slate-500 hover:text-rose-400 p-2 sm:p-2 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-transparent hover:border-rose-500/20">
-                                <Trash2 size={16} />
+                              <button onClick={() => handleDeleteFicha(ficha.id)} title="Excluir Ficha" className="text-slate-400 hover:text-rose-400 p-2.5 sm:p-2 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-transparent hover:border-rose-500/20">
+                                <Trash2 size={18} className="sm:w-4 sm:h-4" />
                               </button>
                             </div>
                           </>
                         ) : (
                           <button onClick={() => handleSaveEdit(ficha.id)} className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all shadow-lg">
-                            <Check size={16} /> Salvar Ficha
+                            <Check size={18} className="sm:w-4 sm:h-4" /> Salvar Ficha
                           </button>
                         )}
                       </div>
@@ -421,19 +430,31 @@ export default function Treino() {
                           <div className="space-y-3 pt-3">
                             <span className="text-[10px] sm:text-[11px] text-cyan-400 uppercase tracking-widest font-bold">Editando Exercícios e Cargas:</span>
                             {editExercicios.map((ex, index) => (
-                              <div key={index} className="flex flex-col gap-2 bg-black/40 p-3 sm:p-4 rounded-xl border border-white/10 relative group">
-                                <input 
-                                  type="text" 
-                                  value={ex.nome} 
-                                  onChange={(e) => {
-                                    const updated = [...editExercicios];
-                                    updated[index].nome = e.target.value;
-                                    setEditExercicios(updated);
-                                  }} 
-                                  className="w-full sm:flex-1 bg-white/5 border border-white/10 rounded-lg p-2.5 text-base sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-semibold placeholder:text-slate-500"
-                                  placeholder="Nome do Exercício"
-                                />
-                                <div className="grid grid-cols-3 sm:flex sm:gap-3 gap-2">
+                              <div key={index} className="flex flex-col gap-3 bg-black/40 p-4 rounded-xl border border-white/10">
+                                
+                                <div className="flex items-center gap-2">
+                                  <input 
+                                    type="text" 
+                                    value={ex.nome} 
+                                    onChange={(e) => {
+                                      const updated = [...editExercicios];
+                                      updated[index].nome = e.target.value;
+                                      setEditExercicios(updated);
+                                    }} 
+                                    className="flex-1 bg-white/5 border border-white/10 rounded-lg p-3 text-base sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-semibold placeholder:text-slate-500"
+                                    placeholder="Nome do Exercício"
+                                  />
+                                  <button 
+                                    type="button" 
+                                    onClick={() => setEditExercicios(editExercicios.filter((_, idx) => idx !== index))}
+                                    className="p-3 bg-rose-500/10 text-rose-400 rounded-lg hover:bg-rose-500/20 transition-colors border border-rose-500/20 shrink-0"
+                                    title="Remover Exercício"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
+                                
+                                <div className="grid grid-cols-3 gap-2 sm:gap-3">
                                   <input 
                                     type="text" 
                                     value={ex.series} 
@@ -442,7 +463,7 @@ export default function Treino() {
                                       updated[index].series = e.target.value;
                                       setEditExercicios(updated);
                                     }} 
-                                    className="w-full sm:w-20 bg-black/60 border border-white/10 rounded-lg p-2.5 text-base sm:text-sm text-center text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono placeholder:text-slate-600"
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg p-2.5 sm:p-3 text-base sm:text-sm text-center text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono placeholder:text-slate-600"
                                     placeholder="Séries"
                                   />
                                   <input 
@@ -453,7 +474,7 @@ export default function Treino() {
                                       updated[index].reps = e.target.value;
                                       setEditExercicios(updated);
                                     }} 
-                                    className="w-full sm:w-20 bg-black/60 border border-white/10 rounded-lg p-2.5 text-base sm:text-sm text-center text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono placeholder:text-slate-600"
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg p-2.5 sm:p-3 text-base sm:text-sm text-center text-slate-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono placeholder:text-slate-600"
                                     placeholder="Reps"
                                   />
                                   <input 
@@ -464,26 +485,19 @@ export default function Treino() {
                                       updated[index].carga = e.target.value;
                                       setEditExercicios(updated);
                                     }} 
-                                    className="w-full sm:w-24 bg-cyan-950/30 border border-cyan-500/30 rounded-lg p-2.5 text-base sm:text-sm text-center text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono font-bold placeholder:text-slate-600"
+                                    className="w-full bg-cyan-950/30 border border-cyan-500/30 rounded-lg p-2.5 sm:p-3 text-base sm:text-sm text-center text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono font-bold placeholder:text-slate-600"
                                     placeholder="Carga"
                                   />
                                 </div>
-                                <button 
-                                  type="button" 
-                                  onClick={() => setEditExercicios(editExercicios.filter((_, idx) => idx !== index))}
-                                  className="absolute top-2 right-2 sm:top-1/2 sm:-translate-y-1/2 sm:right-3 text-slate-500 hover:text-rose-400 p-2 sm:p-1.5 bg-black/50 sm:bg-transparent rounded-lg hover:bg-rose-500/20 transition-all border border-white/5 sm:border-none"
-                                >
-                                  <X size={16} />
-                                </button>
                               </div>
                             ))}
 
                             <button 
                               type="button" 
                               onClick={() => setEditExercicios([...editExercicios, { nome: '', series: '3x', reps: '10', carga: '0kg' }])}
-                              className="w-full py-3 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 hover:border-white/40 text-slate-300 hover:text-white rounded-xl text-xs font-bold mt-2 transition-all flex items-center justify-center gap-1.5"
+                              className="w-full py-3 sm:py-3.5 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 hover:border-white/40 text-slate-300 hover:text-white rounded-xl text-xs sm:text-sm font-bold mt-2 transition-all flex items-center justify-center gap-1.5"
                             >
-                              <Plus size={14} /> Adicionar Novo Exercício
+                              <Plus size={16} /> Adicionar Novo Exercício
                             </button>
                           </div>
                         )}
@@ -543,16 +557,28 @@ export default function Treino() {
                 const style = tagConfig[log.type] || tagConfig.treino;
                 const Icon = style.icon;
 
+                // LÓGICA DE CORTES ELEGANTES PARA O TÍTULO
+                const hasDetails = log.title.includes(': ');
+                const mainTitle = hasDetails ? log.title.split(': ')[0] : log.title;
+                const details = hasDetails ? log.title.substring(log.title.indexOf(': ') + 2) : '';
+
                 return (
-                  <div key={log.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 bg-black/30 border border-white/10 rounded-2xl hover:border-white/20 hover:bg-white/5 transition-all group relative">
+                  <div key={log.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 bg-black/30 border border-white/10 rounded-2xl hover:border-white/20 hover:bg-white/5 transition-all group relative gap-4">
                     
-                    <div className="flex items-center gap-4">
-                      <span className={`flex items-center justify-center w-12 h-12 rounded-xl border shadow-inner ${style.bg} ${style.border} ${style.text} shrink-0`}>
+                    <div className="flex items-start sm:items-center gap-4 flex-1 min-w-0">
+                      <span className={`flex items-center justify-center w-12 h-12 rounded-xl border shadow-inner ${style.bg} ${style.border} ${style.text} shrink-0 mt-1 sm:mt-0`}>
                         <Icon size={22} />
                       </span>
-                      <div className="overflow-hidden">
-                        <h4 className="text-white text-sm font-bold leading-snug truncate pr-4">{log.title}</h4>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <h4 className="text-white text-sm sm:text-base font-bold leading-snug truncate pr-2">
+                          {mainTitle}
+                        </h4>
+                        {details && (
+                          <p className="text-slate-400 text-[10px] sm:text-xs mt-1 line-clamp-2 sm:line-clamp-1 leading-relaxed">
+                            {details}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
                             <Calendar size={10} /> {formatDateToBR(log.created_at)}
                           </span>
@@ -563,7 +589,7 @@ export default function Treino() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between sm:justify-end mt-4 sm:mt-0 gap-4 pt-4 sm:pt-0 border-t border-white/10 sm:border-0 shrink-0">
+                    <div className="flex items-center justify-between sm:justify-end mt-2 sm:mt-0 gap-4 pt-4 sm:pt-0 border-t border-white/10 sm:border-0 shrink-0">
                       {log.value !== null && (
                         <div className={`font-mono text-sm sm:text-base font-bold px-4 py-2 rounded-xl border shadow-sm flex items-baseline gap-1 ${style.bg} ${style.text} ${style.border}`}>
                           {log.value} <span className="text-[10px] sm:text-xs uppercase font-semibold opacity-80 tracking-widest">{log.unit}</span>
@@ -572,10 +598,10 @@ export default function Treino() {
 
                       <button 
                         onClick={() => { if(window.confirm('Senhor, deseja excluir este registro do histórico?')) deleteHealthLog(log.id) }} 
-                        className="text-slate-500 hover:text-rose-400 p-2 sm:p-2.5 bg-black/40 sm:bg-transparent rounded-xl hover:bg-rose-500/10 transition-all border border-white/5 sm:border-none opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                        className="text-slate-500 hover:text-rose-400 p-2.5 sm:p-2.5 bg-black/40 sm:bg-transparent rounded-xl hover:bg-rose-500/10 transition-all border border-white/5 sm:border-none opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                         title="Excluir"
                       >
-                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <Trash2 className="w-5 h-5 sm:w-5 sm:h-5" />
                       </button>
                     </div>
 

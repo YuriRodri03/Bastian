@@ -9,11 +9,58 @@ const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
 
 const AcoesDoSistema = {
   // ==========================================
+  // RELATÓRIOS E CONSULTAS INTELIGENTES
+  // ==========================================
+  relatorio_diario: () => {
+    const hoje = new Date().toISOString().split('T')[0];
+    const agendaHoje = useAgendaStore.getState().agendaItems.filter(e => e.date === hoje);
+    const inboxPendentes = useInboxStore.getState().inboxTasks.filter(t => !t.completed && (!t.date || t.date === hoje));
+    
+    const transacoes = useFinanceStore.getState().transactions || [];
+    const saldo = transacoes.reduce((acc, t) => {
+      if ((t.status || 'pago') !== 'pago') return acc;
+      return (t.type === 'receita' || t.type === 'income') ? acc + t.amount : acc - t.amount;
+    }, 0);
+    
+    const healthLogs = useFitnessStore.getState().healthLogs || [];
+    const ultimoPeso = healthLogs.filter(l => l.type === 'peso').sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+    let resumo = `Bom dia, senhor Yuri. Aqui está o seu panorama operacional. `;
+    
+    if (agendaHoje.length > 0) {
+      resumo += `Temos ${agendaHoje.length} compromissos marcados para hoje. `;
+    } else {
+      resumo += `Sua agenda de eventos está livre hoje. `;
+    }
+    
+    if (inboxPendentes.length > 0) {
+      resumo += `Existem ${inboxPendentes.length} tarefas prioritárias na sua lista diária. `;
+    } else {
+      resumo += `Sua caixa de tarefas está limpa. `;
+    }
+    
+    resumo += `O saldo atual do caixa é de ${saldo.toFixed(2)} reais. `;
+    
+    if (ultimoPeso) {
+      resumo += `E seu último registro corporal foi de ${ultimoPeso.value} quilos. `;
+    }
+    
+    resumo += `Como deseja prosseguir?`;
+    
+    return resumo;
+  },
+
+  // ==========================================
   // FINANÇAS & SAÚDE
   // ==========================================
   registrar_peso: (args) => {
     useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', args.peso, 'kg');
     return `Peso de ${args.peso} quilos atualizado no sistema, senhor.`;
+  },
+
+  registrar_habito: (args) => {
+    useFitnessStore.getState().addHealthLog('habito', args.habito, args.quantidade || 1, args.unidade || 'vez');
+    return `Hábito "${args.habito}" registrado no seu histórico de performance.`;
   },
   
   adicionar_despesa: (args) => {
@@ -22,11 +69,24 @@ const AcoesDoSistema = {
       type: 'despesa',
       amount: Number(args.valor),
       description: args.descricao,
-      category: args.categoria || 'Geral',
+      category: args.categoria || 'Outros',
       date: new Date().toISOString().split('T')[0], 
       status: 'pago' 
     });
     return `Despesa de ${args.valor} reais referente a ${args.descricao} foi registrada no painel financeiro.`;
+  },
+
+  adicionar_receita: (args) => {
+    const { addTransaction } = useFinanceStore.getState(); 
+    addTransaction({
+      type: 'receita',
+      amount: Number(args.valor),
+      description: args.descricao,
+      category: args.categoria || 'Outros',
+      date: new Date().toISOString().split('T')[0], 
+      status: 'pago' 
+    });
+    return `Excelente. A receita de ${args.valor} reais referente a ${args.descricao} foi adicionada ao seu caixa.`;
   },
 
   iniciar_pomodoro: (args) => {
@@ -67,17 +127,25 @@ const AcoesDoSistema = {
   },
 
   // ==========================================
-  // INBOX DIÁRIO (TO-DO LIST RÁPIDA)
+  // INBOX DIÁRIO & CAPTURA RÁPIDA
   // ==========================================
+  salvar_insight: (args) => {
+    const { addInboxTask } = useInboxStore.getState();
+    const dataHoje = new Date().toISOString().split('T')[0];
+    addInboxTask(`[Insight] ${args.texto}`, dataHoje);
+    return `Ideia capturada e salva na sua caixa de entrada, senhor.`;
+  },
+
   adicionar_tarefa: (args) => {
     const { addInboxTask } = useInboxStore.getState();
-    addInboxTask(args.titulo);
-    return `A tarefa "${args.titulo}" foi adicionada à sua caixa de entrada diária.`;
+    const dataHoje = new Date().toISOString().split('T')[0];
+    addInboxTask(args.titulo, dataHoje);
+    return `A tarefa "${args.titulo}" foi adicionada à sua caixa de entrada de hoje.`;
   },
 
   concluir_tarefa: (args) => {
     const { toggleInboxTask } = useInboxStore.getState();
-    toggleInboxTask(args.id, false); // Passa false para que a store inverta para true (concluído)
+    toggleInboxTask(args.id, false);
     return `Excelente, senhor. Tarefa marcada como concluída.`;
   },
 
@@ -92,7 +160,6 @@ const AcoesDoSistema = {
   // ==========================================
   adicionar_kanban: (args) => {
     const { addTask } = useKanbanStore.getState();
-    // Se a IA não mandar coluna, joga pro backlog
     addTask(args.titulo, args.coluna || 'backlog');
     return `O cartão "${args.titulo}" foi criado no quadro Kanban.`;
   },
@@ -129,16 +196,18 @@ export async function enviarComandoParaIA(comandoTexto) {
     const dataLocal = new Date(hoje.getTime() - offsetTempo);
     const dataAtual = dataLocal.toISOString().split('T')[0]; 
     const dataFormatadaPT = dataLocal.toLocaleDateString('pt-BR');
+    
+    const mesAtual = dataAtual.substring(0, 7); // YYYY-MM
 
     // =========================================================================
     // 1. INJEÇÃO DE CONTEXTO & IDS (Memória RAM Mapeada)
     // =========================================================================
     
-    // Captura apenas algumas transações para contexto financeiro básico
+    // Captura as transações DO MÊS para permitir análises e perguntas sobre gastos
     const financeState = useFinanceStore.getState();
-    const ultimasTransacoes = (financeState.transactions || []).slice(-5).map(t => ({
-      descricao: t.description, valor: t.amount, tipo: t.type
-    }));
+    const transacoesMes = (financeState.transactions || [])
+      .filter(t => t.date && t.date.startsWith(mesAtual))
+      .map(t => ({ descricao: t.description, valor: t.amount, tipo: t.type, categoria: t.category, data: t.date }));
     
     // AGENDA: Mapeia apenas eventos futuros ou de hoje com IDs
     const agendaState = useAgendaStore.getState();
@@ -150,7 +219,7 @@ export async function enviarComandoParaIA(comandoTexto) {
     const inboxState = useInboxStore.getState();
     const tarefasPendentes = (inboxState.inboxTasks || [])
       .filter(t => !t.completed)
-      .map(t => ({ id: t.id, titulo: t.title }));
+      .map(t => ({ id: t.id, titulo: t.title, data: t.date }));
 
     // KANBAN: Tarefas organizadas no quadro de projetos
     const kanbanState = useKanbanStore.getState();
@@ -165,26 +234,28 @@ export async function enviarComandoParaIA(comandoTexto) {
     // =========================================================================
     const prompt = `
       Você é "Bastian", a IA assistente pessoal avançada do sistema "Centro de Comando".
-      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada e cirúrgica.
+      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente analítica e cirúrgica, semelhante a um mordomo de alta tecnologia.
       
       INFORMAÇÕES DE SISTEMA:
       - Data de hoje: ${dataFormatadaPT} (Formato ISO: ${dataAtual}).
       
-      DADOS ATUAIS DO USUÁRIO (Base de Conhecimento com IDs):
+      DADOS ATUAIS DO USUÁRIO (Base de Conhecimento):
       - Calendário/Agenda (Futuros): ${JSON.stringify(eventosAgenda)}
       - Inbox Diário (Pendentes): ${JSON.stringify(tarefasPendentes)}
       - Quadro Kanban (Projetos): ${JSON.stringify(tarefasKanban)}
-      - Finanças Recentes: ${JSON.stringify(ultimasTransacoes)}
+      - Finanças do Mês Atual: ${JSON.stringify(transacoesMes)}
       
       DIRETRIZES CRÍTICAS DE MANIPULAÇÃO:
-      - Para excluir, concluir, atualizar ou mover um item existente (Agenda, Inbox ou Kanban), você OBRIGATORIAMENTE precisa analisar a frase do usuário, procurar o item correspondente nos "DADOS ATUAIS" fornecidos acima e usar o "id" exato no argumento da função. NUNCA invente um ID.
+      - Se o usuário pedir o "relatório de hoje", "briefing", ou "resumo do dia", use a função "relatorio_diario".
+      - Se o usuário perguntar sobre gastos ou dados específicos ("Quanto gastei com X?", "O que tenho agendado?"), analise os "DADOS ATUAIS DO USUÁRIO" acima, faça os cálculos necessários e responda usando a função "conversar".
+      - Para excluir, concluir, atualizar ou mover um item existente (Agenda, Inbox ou Kanban), OBRIGATORIAMENTE procure o "id" exato no JSON fornecido acima e passe-o no argumento.
       - As colunas válidas para o Kanban são: "backlog", "in-progress" e "done".
 
       DIRETRIZES DE SÍNTESE DE VOZ (Para a função "conversar"):
-      1. NUNCA use formatação markdown (asteriscos, negritos, etc).
+      1. NUNCA use formatação markdown (sem asteriscos, sem negritos).
       2. NUNCA use emojis.
-      3. ESCREVA NÚMEROS E SÍMBOLOS POR EXTENSO (Ex: "R$ 1500" vira "mil e quinhentos reais", "18:00" vira "dezoito horas").
-      4. Seja direto e elegante.
+      3. ESCREVA NÚMEROS E SÍMBOLOS POR EXTENSO (Ex: "R$ 1500" vira "mil e quinhentos reais", "18:00" vira "dezoito horas", "10%" vira "dez por cento").
+      4. Seja direto, assertivo e elegante nas respostas.
       
       Sua tarefa é retornar APENAS um JSON estrito no formato:
       {
@@ -192,23 +263,27 @@ export async function enviarComandoParaIA(comandoTexto) {
         "argumentos": { ... }
       }
 
-      Lista completa de Funções e Argumentos exigidos:
-      - "conversar" -> args: "resposta" (string formatada para áudio)
+      Lista de Funções e Argumentos exigidos:
+      - "conversar" -> args: "resposta" (string formatada para áudio sem símbolos)
+      - "relatorio_diario" -> args: {} (vazio)
       
       - "adicionar_agenda" -> args: "titulo" (string), "data" (YYYY-MM-DD), "hora" (HH:MM ou null)
-      - "atualizar_agenda" -> args: "id" (string encontrado nos dados), "nova_data" (YYYY-MM-DD), "nova_hora" (HH:MM ou null), "novo_titulo" (string)
-      - "excluir_agenda" -> args: "id" (string encontrado nos dados)
+      - "atualizar_agenda" -> args: "id" (string dos dados), "nova_data" (YYYY-MM-DD), "nova_hora" (HH:MM ou null), "novo_titulo" (string)
+      - "excluir_agenda" -> args: "id" (string dos dados)
       
       - "adicionar_tarefa" -> args: "titulo" (string)
-      - "concluir_tarefa" -> args: "id" (string encontrado nos dados)
-      - "excluir_tarefa" -> args: "id" (string encontrado nos dados)
+      - "concluir_tarefa" -> args: "id" (string dos dados)
+      - "excluir_tarefa" -> args: "id" (string dos dados)
+      - "salvar_insight" -> args: "texto" (string - use para ideias/anotações rápidas)
       
       - "adicionar_kanban" -> args: "titulo" (string), "coluna" (string: "backlog", "in-progress" ou "done")
-      - "mover_kanban" -> args: "id" (string encontrado nos dados), "nova_coluna" (string: "backlog", "in-progress" ou "done")
-      - "excluir_kanban" -> args: "id" (string encontrado nos dados)
+      - "mover_kanban" -> args: "id" (string dos dados), "nova_coluna" (string)
+      - "excluir_kanban" -> args: "id" (string dos dados)
       
       - "registrar_peso" -> args: "peso" (numero)
+      - "registrar_habito" -> args: "habito" (string), "quantidade" (numero), "unidade" (string)
       - "adicionar_despesa" -> args: "valor" (numero), "descricao" (string)
+      - "adicionar_receita" -> args: "valor" (numero), "descricao" (string)
       - "iniciar_pomodoro" -> args: "minutos" (numero)
 
       Comando do usuário: "${comandoTexto}"
@@ -217,21 +292,21 @@ export async function enviarComandoParaIA(comandoTexto) {
     const result = await model.generateContent(prompt);
     let respostaTexto = result.response.text();
     
-    // Limpeza de segurança (remove codeblocks Markdown gerados acidentalmente pelo Gemini)
+    // Limpeza de segurança 
     respostaTexto = respostaTexto.replace(/```json/g, '').replace(/```/g, '').trim();
     
     const comandoEstruturado = JSON.parse(respostaTexto);
     
     if (AcoesDoSistema[comandoEstruturado.funcao]) {
-      let mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos);
-      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, ''); // Garante áudio limpo
+      let mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos || {});
+      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, ''); // Limpa resíduos para síntese de voz
       return { sucesso: true, mensagem: mensagemRetorno };
     } else {
-      return { sucesso: false, mensagem: "Desculpe, senhor. Reconheci a intenção, mas meus protocolos centrais não possuem execução para este módulo." };
+      return { sucesso: false, mensagem: "Senhor, a intenção foi compreendida, mas os protocolos de execução deste módulo falharam." };
     }
 
   } catch (error) {
     console.error("Erro no processamento neural (Gemini):", error);
-    return { sucesso: false, mensagem: "Houve uma falha na minha rede neural ao processar o seu pedido, senhor." };
+    return { sucesso: false, mensagem: "Houve uma instabilidade na minha rede neural. Por favor, tente novamente." };
   }
 }

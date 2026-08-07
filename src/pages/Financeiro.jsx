@@ -5,7 +5,8 @@ import {
   Tag, Trash2, Pencil, X, PieChart as PieChartIcon,
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
-  PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins
+  PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
+  Eye, Sparkles
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -93,7 +94,6 @@ const CustomTooltip = ({ active, payload }) => {
 export default function Financeiro() {
   const { transactions, addTransaction, removeTransaction, updateTransaction, toggleTransactionStatus, fetchTransactions } = useFinanceStore();
   
-  // Ref para rolar a tela até o formulário
   const formRef = useRef(null);
 
   useEffect(() => {
@@ -107,6 +107,9 @@ export default function Financeiro() {
   const [date, setDate] = useState(getTodayFormatted());
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
+
+  // ESTADO DO MODO PROJEÇÃO
+  const [isProjected, setIsProjected] = useState(false);
 
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -145,26 +148,32 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  const { totalReceitas, totalDespesas, aPagar, saldoPeriodo } = useMemo(() => {
+  // CÁLCULOS SEPARADOS (PAGOS E PENDENTES)
+  const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
       const tStatus = t.status || 'pago';
-      if (t.type === 'receita' && tStatus === 'pago') {
-        acc.totalReceitas += t.amount;
-        acc.saldoPeriodo += t.amount;
+      const valor = Number(t.amount) || 0;
+      
+      if (t.type === 'receita') {
+        if (tStatus === 'pago') acc.receitasPagas += valor;
+        else acc.aReceber += valor;
+      } else {
+        if (tStatus === 'pago') acc.despesasPagas += valor;
+        else acc.aPagar += valor;
       }
-      if (t.type === 'despesa' && tStatus === 'pago') {
-        acc.totalDespesas += t.amount;
-        acc.saldoPeriodo -= t.amount;
-      }
-      if (t.type === 'despesa' && tStatus === 'pendente') {
-        acc.aPagar += t.amount;
-      }
+      
       return acc;
-    }, { totalReceitas: 0, totalDespesas: 0, aPagar: 0, saldoPeriodo: 0 });
+    }, { receitasPagas: 0, despesasPagas: 0, aPagar: 0, aReceber: 0 });
   }, [filteredTransactions]);
 
+  // VALORES EXIBIDOS COM BASE NO MODO PROJEÇÃO
+  const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
+  const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
+  const displayBalanco = displayReceitas - displayDespesas;
+
   const despesasPorCategoria = useMemo(() => {
-    const despesas = filteredTransactions.filter(t => t.type === 'despesa' && (t.status || 'pago') === 'pago');
+    // No modo projetado, inclui as despesas pendentes no gráfico
+    const despesas = filteredTransactions.filter(t => t.type === 'despesa' && (isProjected ? true : (t.status || 'pago') === 'pago'));
     const agrupado = despesas.reduce((acc, transacao) => {
       const index = acc.findIndex(item => item.name === transacao.category);
       if (index !== -1) acc[index].value += transacao.amount;
@@ -172,7 +181,7 @@ export default function Financeiro() {
       return acc;
     }, []);
     return agrupado.sort((a, b) => b.value - a.value);
-  }, [filteredTransactions]);
+  }, [filteredTransactions, isProjected]);
 
   const handleAmountChange = (e) => setAmount(formatCurrency(e.target.value));
 
@@ -212,7 +221,6 @@ export default function Financeiro() {
     }
     setStatus(t.status || 'pago');
     
-    // Ancoramento: Rola a tela suavemente para o formulário
     setTimeout(() => {
       if (formRef.current) {
         formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -237,7 +245,6 @@ export default function Financeiro() {
   });
 
   return (
-    // Adicionado overflow-x-hidden e controle de largura total para evitar problemas de viewport
     <div className="min-h-[calc(100vh-80px)] w-full px-3 py-6 sm:p-8 font-sans flex flex-col items-center overflow-x-hidden box-border max-w-[100vw]">
       
       {/* Cabeçalho com Filtros */}
@@ -252,81 +259,106 @@ export default function Financeiro() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl flex-wrap sm:flex-nowrap">
-          <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block">
-            <Filter size={16} />
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap w-full sm:w-auto">
+          
+          {/* BOTÃO DE MODO PROJEÇÃO */}
+          <button 
+            onClick={() => setIsProjected(!isProjected)}
+            className={`flex-1 sm:flex-none items-center justify-center flex gap-2 px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-lg ${
+              isProjected 
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/30 border border-indigo-500/50' 
+                : 'bg-white/5 text-slate-400 border border-white/10 hover:bg-white/10 hover:text-slate-200'
+            }`}
+          >
+            {isProjected ? <Sparkles size={16} className="animate-pulse"/> : <Eye size={16} />}
+            <span>{isProjected ? 'Projeção Ativa' : 'Visão Atual'}</span>
+          </button>
+
+          <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-xl flex-1 sm:flex-none">
+            <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block">
+              <Filter size={16} />
+            </div>
+            <select 
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1.5 hover:text-white transition-colors flex-1"
+            >
+              <option value="all" className="bg-slate-900 text-slate-200">Visão Anual</option>
+              {MESES.map(m => (
+                <option key={m.valor} value={m.valor} className="bg-slate-900 text-slate-200">{m.nome}</option>
+              ))}
+            </select>
+            <div className="w-px h-5 sm:h-6 bg-white/10"></div>
+            <select 
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+              className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1.5 pr-2 sm:pr-4 hover:text-white transition-colors"
+            >
+              {availableYears.map(year => (
+                <option key={year} value={year} className="bg-slate-900 text-slate-200">{year}</option>
+              ))}
+            </select>
           </div>
-          <select 
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
-            className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 hover:text-white transition-colors"
-          >
-            <option value="all" className="bg-slate-900 text-slate-200">Visão Anual</option>
-            {MESES.map(m => (
-              <option key={m.valor} value={m.valor} className="bg-slate-900 text-slate-200">{m.nome}</option>
-            ))}
-          </select>
-          <div className="w-px h-5 sm:h-6 bg-white/10"></div>
-          <select 
-            value={filterYear}
-            onChange={(e) => setFilterYear(e.target.value)}
-            className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-2 pr-2 sm:pr-4 hover:text-white transition-colors"
-          >
-            {availableYears.map(year => (
-              <option key={year} value={year} className="bg-slate-900 text-slate-200">{year}</option>
-            ))}
-          </select>
         </div>
       </div>
 
-      {/* Cards de Resumo - Compactados no mobile (grid-cols-2) */}
+      {/* 4 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-8">
         
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
-            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">Receitas</span>
+            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
+              {isProjected ? 'Receitas (Projetadas)' : 'Receitas (Pagas)'}
+            </span>
             <div className="p-1.5 sm:p-2.5 bg-emerald-500/10 rounded-lg sm:rounded-xl shrink-0">
               <TrendingUp className="text-emerald-400 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="font-mono text-base sm:text-2xl font-bold text-emerald-400 relative z-10 truncate">
-            {totalReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          <div className="font-mono text-base sm:text-2xl font-bold text-emerald-400 relative z-10 truncate transition-all duration-300">
+            {displayReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
-            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">Despesas</span>
+            <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
+              {isProjected ? 'Despesas (Projetadas)' : 'Despesas (Pagas)'}
+            </span>
             <div className="p-1.5 sm:p-2.5 bg-rose-500/10 rounded-lg sm:rounded-xl shrink-0">
               <TrendingDown className="text-rose-400 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className="font-mono text-base sm:text-2xl font-bold text-rose-400 relative z-10 truncate">
-            {totalDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          <div className="font-mono text-base sm:text-2xl font-bold text-rose-400 relative z-10 truncate transition-all duration-300">
+            {displayDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-amber-500/30 transition-all">
+        {/* Card 3: Alterna entre A Pagar e A Receber dependendo da Projeção */}
+        <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-cyan-500/10 border-cyan-500/20 hover:border-cyan-500/30' : 'from-amber-500/10 border-amber-500/20 hover:border-amber-500/30'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
-            <span className="text-[10px] sm:text-sm font-semibold text-amber-200/70 tracking-wide uppercase truncate mr-2">A Pagar</span>
-            <div className="p-1.5 sm:p-2.5 bg-amber-500/20 rounded-lg sm:rounded-xl shrink-0">
-              <Clock className="text-amber-400 w-3 h-3 sm:w-5 sm:h-5" />
+            <span className={`text-[10px] sm:text-sm font-semibold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-cyan-200/70' : 'text-amber-200/70'}`}>
+              {isProjected ? 'A Receber' : 'A Pagar'}
+            </span>
+            <div className={`p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl shrink-0 ${isProjected ? 'bg-cyan-500/20' : 'bg-amber-500/20'}`}>
+              {isProjected ? <ArrowUpRight className="text-cyan-400 w-3 h-3 sm:w-5 sm:h-5" /> : <Clock className="text-amber-400 w-3 h-3 sm:w-5 sm:h-5" />}
             </div>
           </div>
-          <div className="font-mono text-base sm:text-2xl font-bold text-amber-400 relative z-10 truncate">
-            {aPagar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${isProjected ? 'text-cyan-400' : 'text-amber-400'}`}>
+            {(isProjected ? aReceber : aPagar).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-indigo-500/20 to-transparent border border-indigo-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-indigo-500/40 transition-all">
+        <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
-            <span className="text-[10px] sm:text-sm font-semibold text-indigo-200/70 tracking-wide uppercase truncate mr-2">Balanço</span>
+            <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
+              {isProjected ? 'Balanço Final' : 'Balanço Atual'}
+            </span>
             <div className="p-1.5 sm:p-2.5 bg-indigo-500/20 rounded-lg sm:rounded-xl shrink-0">
               <DollarSign className="text-indigo-300 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate ${saldoPeriodo >= 0 ? 'text-white' : 'text-rose-400'}`}>
-            {saldoPeriodo >= 0 ? '+' : ''}{saldoPeriodo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${displayBalanco >= 0 ? 'text-white' : 'text-rose-400'}`}>
+            {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
@@ -337,7 +369,6 @@ export default function Financeiro() {
         {/* Formulário + Gráfico */}
         <div className="lg:col-span-1 flex flex-col gap-6 sticky top-20">
           
-          {/* A referência 'formRef' fica aqui para a tela rolar pra cá */}
           <div ref={formRef} className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-7 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl scroll-mt-24">
             <div className="flex justify-between items-center mb-5 sm:mb-6">
               <h2 className="text-base sm:text-lg font-bold text-white">
@@ -353,7 +384,6 @@ export default function Financeiro() {
             <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Descrição</label>
-                {/* Inputs agora usam text-base no mobile para bloquear o zoom do Safari */}
                 <input 
                   type="text"
                   value={description}
@@ -363,7 +393,6 @@ export default function Financeiro() {
                 />
               </div>
 
-              {/* Ajustado para grid-cols-1 no celular e 2 no Desktop para evitar esmagamento */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Valor</label>
@@ -439,16 +468,20 @@ export default function Financeiro() {
             </form>
           </div>
 
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[300px] sm:h-[360px] flex flex-col hidden md:flex">
-            <div className="flex items-center gap-2 mb-2">
-              <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5" />
-              <h2 className="text-sm sm:text-base font-bold text-white">Mapa de Despesas</h2>
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[300px] sm:h-[360px] flex flex-col hidden md:flex transition-all">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5" />
+                <h2 className="text-sm sm:text-base font-bold text-white">
+                  Mapa de Despesas {isProjected && <span className="text-cyan-400 text-xs">(Projetado)</span>}
+                </h2>
+              </div>
             </div>
             
             <div className="flex-1 w-full relative">
               {despesasPorCategoria.length === 0 ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs sm:text-sm text-center px-4">
-                  Nenhuma despesa paga no período.
+                  Nenhuma despesa para este período.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">

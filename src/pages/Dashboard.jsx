@@ -3,8 +3,11 @@ import { useFinanceStore } from '../store/useFinanceStore';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { useAgendaStore } from '../store/useAgendaStore'; 
 import { useInboxStore } from '../store/useInboxStore';   
-import { Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, Calendar, Target, CheckSquare, Clock, BarChart3 } from 'lucide-react';
-// IMPORTANTE: Certifique-se de que a linha abaixo está exatamente assim
+import { 
+  Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, 
+  ChevronLeft, ChevronRight, Calendar, Target, CheckSquare, Clock, 
+  BarChart3, LayoutGrid 
+} from 'lucide-react';
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
 import StatCard from '../components/StatCard';
@@ -112,8 +115,9 @@ export default function Dashboard() {
       .filter(item => item.date === dataDeHojeStr)
       .sort((a, b) => (a.time || '24:00').localeCompare(b.time || '24:00'));
 
-    const tarefas = inboxTasks.filter(t => !t.completed);
-    const tarefasTotais = inboxTasks.length;
+    // Filtra tarefas não concluídas que pertencem a HOJE ou que não tem data (retrocompatibilidade)
+    const tarefas = inboxTasks.filter(t => !t.completed && (!t.date || t.date === dataDeHojeStr));
+    const tarefasTotais = inboxTasks.filter(t => (!t.date || t.date === dataDeHojeStr)).length;
     
     const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const eventoSeguinte = eventos.find(e => (e.time || '24:00') >= horaAtual);
@@ -240,23 +244,31 @@ export default function Dashboard() {
   return (
     <div className="min-h-[calc(100vh-80px)] w-full px-3 py-6 sm:p-8 font-sans flex flex-col items-center overflow-x-hidden box-border max-w-[100vw]">
       
-      {/* CABEÇALHO */}
-      <div className="w-full max-w-7xl mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-100 tracking-tight">Centro de Comando</h1>
-          <p className="text-xs sm:text-sm font-medium text-slate-400 mt-1">Visão geral integrada: Foco, finanças e performance</p>
+      {/* CABEÇALHO PADRÃO GLASSMORPHISM (Alinhado com outras páginas) */}
+      <div className="w-full max-w-7xl mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5 sm:gap-6">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-gradient-to-br from-indigo-500/20 to-cyan-500/10 rounded-2xl border border-indigo-500/20 backdrop-blur-md shadow-lg shadow-indigo-500/10">
+            <LayoutGrid className="text-indigo-400 w-6 h-6 sm:w-7 sm:h-7" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Centro de Comando</h1>
+            <p className="text-xs sm:text-sm text-slate-400 font-medium">Visão geral integrada do seu sistema</p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-gradient-to-br from-white/10 to-transparent border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-lg self-start sm:self-auto">
-          <button onClick={handlePrevMonth} className="p-2 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl transition-all">
+        {/* NAVEGADOR TEMPORAL (Estilo Financeiro) */}
+        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl flex-wrap sm:flex-nowrap w-full sm:w-auto">
+          <button onClick={handlePrevMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
             <ChevronLeft size={18} />
           </button>
-
-          <div className="relative flex items-center justify-center gap-2 px-3 sm:px-4 py-1.5 cursor-pointer hover:bg-white/5 rounded-xl transition-all min-w-[120px] sm:min-w-[140px]" onClick={() => setIsPickerOpen(!isPickerOpen)}>
-            <Calendar className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-sm font-bold text-slate-200 capitalize text-center tracking-wide truncate">
-              {formattedMonthName}
-            </span>
+          
+          <div className="flex-1 flex justify-center relative min-w-[140px]" onClick={() => setIsPickerOpen(!isPickerOpen)}>
+            <div className="flex items-center justify-center gap-2 cursor-pointer py-1.5 px-2 hover:text-white transition-colors group">
+              <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span className="text-sm font-bold text-slate-200 capitalize tracking-wide truncate group-hover:text-white transition-colors">
+                {formattedMonthName}
+              </span>
+            </div>
             {isPickerOpen && (
               <input 
                 type="month" 
@@ -269,7 +281,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          <button onClick={handleNextMonth} className="p-2 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl transition-all">
+          <button onClick={handleNextMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
             <ChevronRight size={18} />
           </button>
         </div>
@@ -329,11 +341,11 @@ export default function Dashboard() {
         {/* COLUNA ESQUERDA (FOCO PRINCIPAL) */}
         <div className="lg:col-span-8 flex flex-col gap-5 sm:gap-6">
           
-          <div className="w-full relative z-10 transition-transform duration-300 hover:scale-[1.01]">
+          <div className="w-full relative z-10 transition-transform duration-300 hover:scale-[1.01] bg-black/20 rounded-[2.5rem] border border-white/5 p-1 shadow-inner">
             <PomodoroWidget />
           </div>
 
-          {/* NOVO GRÁFICO COMPOSTO UNIFICADO */}
+          {/* GRÁFICO COMPOSTO UNIFICADO */}
           <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-4 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
@@ -341,7 +353,6 @@ export default function Dashboard() {
               </h2>
             </div>
             
-            {/* Altura ABSOLUTA aplicada (h-80) para impedir o colapso do Recharts no Mobile */}
             <div className="flex flex-col h-80 sm:h-96 w-full">
               <h3 className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <BarChart3 size={14} className="text-indigo-400 shrink-0"/> Fluxo Diário vs Saldo Acumulado
@@ -415,7 +426,7 @@ export default function Dashboard() {
               <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <Target size={18} className="text-indigo-400" /> Foco de Hoje
               </h3>
-              <span className="text-[10px] sm:text-xs font-bold text-slate-300 bg-black/40 px-2 sm:px-3 py-1.5 rounded-lg border border-white/5">
+              <span className="text-[10px] sm:text-xs font-bold text-slate-300 bg-black/40 px-2 sm:px-3 py-1.5 rounded-lg border border-white/5 shadow-inner">
                 {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
               </span>
             </div>
@@ -449,15 +460,15 @@ export default function Dashboard() {
                       type="checkbox" 
                       checked={task.completed}
                       onChange={() => {}} 
-                      className="w-4 h-4 rounded border-white/20 bg-black/40 text-indigo-500 focus:ring-indigo-500/50 cursor-pointer pointer-events-none shrink-0"
+                      className="w-4 h-4 rounded border-white/20 bg-black/40 text-indigo-500 focus:ring-indigo-500/50 cursor-pointer pointer-events-none shrink-0 transition-colors"
                     />
                     <span className="text-xs sm:text-sm font-medium text-slate-300 truncate group-hover:text-white transition-colors">{task.title}</span>
                   </div>
                 ))
               )}
               {tarefasPendentes.length > 5 && (
-                <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 text-center mt-2 uppercase tracking-wider">
-                  + {tarefasPendentes.length - 5} tarefas na Agenda
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-500 text-center mt-2 uppercase tracking-wider bg-black/20 py-2 rounded-xl border border-white/5">
+                  + {tarefasPendentes.length - 5} tarefas ocultas
                 </div>
               )}
             </div>
