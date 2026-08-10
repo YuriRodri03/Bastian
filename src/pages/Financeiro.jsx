@@ -6,12 +6,23 @@ import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
-  Eye, Sparkles
+  Eye, Sparkles, ShoppingCart, Shirt
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-const CATEGORIAS_RECEITA = ['Salário', 'Bolsa Acadêmica/CNPq', 'Freelance', 'Rendimentos/Investimentos', 'Restituição', 'Outros'];
-const CATEGORIAS_DESPESA = ['Alimentação', 'Moradia', 'Transporte', 'Contas Fixas', 'Saúde', 'Educação/Pesquisa', 'Assinaturas/Software', 'Lazer', 'Cartão de Crédito', 'Outros'];
+// CATEGORIAS ULTRA REALISTAS E PRÁTICAS
+const CATEGORIAS_RECEITA = [
+  'Salário', 'Freelance / Serviços', 'Rendimentos / Dividendos', 
+  'Bolsa Acadêmica / Auxílio', 'Cashback / Restituição', 'Vendas', 'Outros'
+];
+
+const CATEGORIAS_DESPESA = [
+  'Moradia (Aluguel/Condomínio)', 'Alimentação (Mercado/Padaria)', 
+  'Refeições (Ifood/Restaurante)', 'Transporte (Uber/Ônibus/Gasolina)', 
+  'Contas Básicas (Água/Luz/Net)', 'Saúde e Farmácia', 'Educação e Cursos', 
+  'Assinaturas (Netflix/Spotify)', 'Lazer e Saídas', 'Vestuário e Cuidados', 
+  'Cartão de Crédito', 'Impostos e Taxas', 'Outros'
+];
 
 const CORES_GRAFICO = ['#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'];
 
@@ -26,21 +37,25 @@ const MESES = [
 
 const getCategoryIcon = (category) => {
   switch (category) {
-    case 'Alimentação': return <Utensils size={14} className="text-orange-400" />;
-    case 'Moradia': return <Home size={14} className="text-indigo-400" />;
-    case 'Transporte': return <Car size={14} className="text-sky-400" />;
-    case 'Contas Fixas': return <Lightbulb size={14} className="text-yellow-400" />;
-    case 'Saúde': return <HeartPulse size={14} className="text-rose-400" />;
-    case 'Educação/Pesquisa': return <GraduationCap size={14} className="text-purple-400" />;
-    case 'Assinaturas/Software': return <Laptop size={14} className="text-cyan-400" />;
-    case 'Lazer': return <PartyPopper size={14} className="text-fuchsia-400" />;
+    case 'Moradia (Aluguel/Condomínio)': return <Home size={14} className="text-indigo-400" />;
+    case 'Alimentação (Mercado/Padaria)': return <ShoppingCart size={14} className="text-orange-400" />;
+    case 'Refeições (Ifood/Restaurante)': return <Utensils size={14} className="text-amber-400" />;
+    case 'Transporte (Uber/Ônibus/Gasolina)': return <Car size={14} className="text-sky-400" />;
+    case 'Contas Básicas (Água/Luz/Net)': return <Lightbulb size={14} className="text-yellow-400" />;
+    case 'Saúde e Farmácia': return <HeartPulse size={14} className="text-rose-400" />;
+    case 'Educação e Cursos': return <GraduationCap size={14} className="text-purple-400" />;
+    case 'Assinaturas (Netflix/Spotify)': return <Laptop size={14} className="text-cyan-400" />;
+    case 'Lazer e Saídas': return <PartyPopper size={14} className="text-fuchsia-400" />;
+    case 'Vestuário e Cuidados': return <Shirt size={14} className="text-pink-400" />;
     case 'Cartão de Crédito': return <CreditCard size={14} className="text-slate-300" />;
+    case 'Impostos e Taxas': return <Landmark size={14} className="text-slate-400" />;
     
     case 'Salário': return <Briefcase size={14} className="text-emerald-400" />;
-    case 'Bolsa Acadêmica/CNPq': return <Landmark size={14} className="text-blue-400" />;
-    case 'Freelance': return <Code size={14} className="text-teal-400" />;
-    case 'Rendimentos/Investimentos': return <TrendingUp size={14} className="text-green-400" />;
-    case 'Restituição': return <RefreshCw size={14} className="text-emerald-300" />;
+    case 'Bolsa Acadêmica / Auxílio': return <GraduationCap size={14} className="text-blue-400" />;
+    case 'Freelance / Serviços': return <Code size={14} className="text-teal-400" />;
+    case 'Rendimentos / Dividendos': return <TrendingUp size={14} className="text-green-400" />;
+    case 'Cashback / Restituição': return <RefreshCw size={14} className="text-emerald-300" />;
+    case 'Vendas': return <Tag size={14} className="text-indigo-300" />;
     
     default: return <MoreHorizontal size={14} className="text-slate-400" />;
   }
@@ -108,6 +123,11 @@ export default function Financeiro() {
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
 
+  // ESTADO DO CARRINHO DE CARTÃO DE CRÉDITO
+  const [cartItems, setCartItems] = useState([]);
+  const [cartItemName, setCartItemName] = useState('');
+  const [cartItemValue, setCartItemValue] = useState('');
+
   // ESTADO DO MODO PROJEÇÃO
   const [isProjected, setIsProjected] = useState(false);
 
@@ -119,6 +139,7 @@ export default function Financeiro() {
   useEffect(() => {
     if (!editingId) {
       setCategory(type === 'receita' ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0]);
+      setCartItems([]); // Reseta o carrinho se mudar o tipo
     }
   }, [type, editingId]);
 
@@ -166,13 +187,11 @@ export default function Financeiro() {
     }, { receitasPagas: 0, despesasPagas: 0, aPagar: 0, aReceber: 0 });
   }, [filteredTransactions]);
 
-  // VALORES EXIBIDOS COM BASE NO MODO PROJEÇÃO
   const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
   const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
   const displayBalanco = displayReceitas - displayDespesas;
 
   const despesasPorCategoria = useMemo(() => {
-    // No modo projetado, inclui as despesas pendentes no gráfico
     const despesas = filteredTransactions.filter(t => t.type === 'despesa' && (isProjected ? true : (t.status || 'pago') === 'pago'));
     const agrupado = despesas.reduce((acc, transacao) => {
       const index = acc.findIndex(item => item.name === transacao.category);
@@ -185,15 +204,49 @@ export default function Financeiro() {
 
   const handleAmountChange = (e) => setAmount(formatCurrency(e.target.value));
 
+  // FUNÇÕES DO CARRINHO
+  const handleAddCartItem = () => {
+    const val = unmaskCurrency(cartItemValue);
+    if (!cartItemName.trim() || !val) return;
+    
+    const newItems = [...cartItems, { id: Date.now(), nome: cartItemName, valor: val }];
+    setCartItems(newItems);
+    setCartItemName('');
+    setCartItemValue('');
+
+    // Atualiza o valor principal travando no total da fatura
+    const total = newItems.reduce((acc, curr) => acc + curr.valor, 0);
+    setAmount(formatCurrency((total * 100).toFixed(0)));
+  };
+
+  const handleRemoveCartItem = (id) => {
+    const newItems = cartItems.filter(i => i.id !== id);
+    setCartItems(newItems);
+    const total = newItems.reduce((acc, curr) => acc + curr.valor, 0);
+    setAmount(total > 0 ? formatCurrency((total * 100).toFixed(0)) : '');
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const numericAmount = unmaskCurrency(amount);
-    if (!numericAmount || !description) return;
+    
+    // Se for cartão com itens mas sem descrição, cria um título automático
+    let baseDescription = description;
+    if (category === 'Cartão de Crédito' && cartItems.length > 0 && !description) {
+      baseDescription = 'Fatura Cartão de Crédito';
+    }
+
+    if (!numericAmount || !baseDescription) return;
+    
+    // Junta os itens do carrinho na descrição final
+    const finalDescription = (category === 'Cartão de Crédito' && cartItems.length > 0)
+      ? `${baseDescription} (${cartItems.map(i => i.nome).join(', ')})`
+      : baseDescription;
     
     const transactionData = {
       id: editingId || Date.now(),
       amount: numericAmount,
-      description,
+      description: finalDescription,
       type,
       category,
       date,
@@ -220,6 +273,7 @@ export default function Financeiro() {
       setDate(t.date || getTodayFormatted());
     }
     setStatus(t.status || 'pago');
+    setCartItems([]); // Resetar carrinho ao editar para não sobrescrever a string pronta
     
     setTimeout(() => {
       if (formRef.current) {
@@ -236,6 +290,9 @@ export default function Financeiro() {
     setCategory(CATEGORIAS_RECEITA[0]);
     setDate(getTodayFormatted());
     setStatus('pago');
+    setCartItems([]);
+    setCartItemName('');
+    setCartItemValue('');
   };
 
   const sortedTransactions = [...filteredTransactions].sort((a, b) => {
@@ -261,7 +318,6 @@ export default function Financeiro() {
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap w-full sm:w-auto">
           
-          {/* BOTÃO DE MODO PROJEÇÃO */}
           <button 
             onClick={() => setIsProjected(!isProjected)}
             className={`flex-1 sm:flex-none items-center justify-center flex gap-2 px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-lg ${
@@ -333,7 +389,6 @@ export default function Financeiro() {
           </div>
         </div>
 
-        {/* Card 3: Alterna entre A Pagar e A Receber dependendo da Projeção */}
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-cyan-500/10 border-cyan-500/20 hover:border-cyan-500/30' : 'from-amber-500/10 border-amber-500/20 hover:border-amber-500/30'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-semibold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-cyan-200/70' : 'text-amber-200/70'}`}>
@@ -382,30 +437,9 @@ export default function Financeiro() {
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Descrição</label>
-                <input 
-                  type="text"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
-                  placeholder="Ex: Aluguel, Supermercado..."
-                />
-              </div>
-
+              
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Valor</label>
-                  <input 
-                    type="text"
-                    inputMode="numeric"
-                    value={amount}
-                    onChange={handleAmountChange}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all font-mono placeholder:text-slate-600"
-                    placeholder="R$ 0,00"
-                  />
-                </div>
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Categoria</label>
                   <select 
                     value={category}
@@ -417,6 +451,80 @@ export default function Financeiro() {
                     ))}
                   </select>
                 </div>
+
+                {/* MÓDULO INTELIGENTE DO CARRINHO DE CARTÃO */}
+                {category === 'Cartão de Crédito' && !editingId && (
+                  <div className="col-span-1 sm:col-span-2 bg-black/20 p-4 rounded-xl border border-white/5 space-y-3 mt-1 shadow-inner">
+                    <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <CreditCard size={14} className="text-indigo-400"/> Lançamentos da Fatura
+                    </h4>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="Ex: Uber, Ifood..." 
+                        value={cartItemName} 
+                        onChange={e => setCartItemName(e.target.value)} 
+                        className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-base sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50 placeholder:text-slate-500" 
+                      />
+                      <input 
+                        type="text" 
+                        inputMode="numeric" 
+                        placeholder="R$ 0,00" 
+                        value={cartItemValue} 
+                        onChange={e => setCartItemValue(formatCurrency(e.target.value))} 
+                        className="w-28 sm:w-32 bg-white/5 border border-white/10 rounded-lg p-2.5 text-base sm:text-sm text-center font-mono text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50 placeholder:text-slate-500" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={handleAddCartItem} 
+                        className="p-2.5 bg-indigo-500/20 text-indigo-400 rounded-lg hover:bg-indigo-500/30 transition-colors border border-indigo-500/20 shrink-0"
+                      >
+                        <Plus size={18}/>
+                      </button>
+                    </div>
+
+                    {cartItems.length > 0 && (
+                      <div className="space-y-1.5 pt-2 max-h-32 overflow-y-auto custom-scrollbar border-t border-white/5">
+                        {cartItems.map(item => (
+                          <div key={item.id} className="flex justify-between items-center text-xs bg-white/5 px-3 py-2 rounded-lg text-slate-300 border border-white/5">
+                            <span className="font-semibold truncate pr-2">{item.nome}</span>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="font-mono text-cyan-400 font-bold tracking-wider">R$ {item.valor.toFixed(2)}</span>
+                              <button type="button" onClick={() => handleRemoveCartItem(item.id)} className="text-slate-500 hover:text-rose-400 transition-colors">
+                                <Trash2 size={14}/>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Descrição (Opcional se usar Carrinho)</label>
+                  <input 
+                    type="text"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
+                    placeholder={category === 'Cartão de Crédito' ? "Ex: Fatura Nubank" : "Ex: Aluguel, Supermercado..."}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Valor Total</label>
+                  <input 
+                    type="text"
+                    inputMode="numeric"
+                    value={amount}
+                    onChange={handleAmountChange}
+                    readOnly={category === 'Cartão de Crédito' && cartItems.length > 0}
+                    className={`w-full bg-black/40 border rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all font-mono placeholder:text-slate-600 ${category === 'Cartão de Crédito' && cartItems.length > 0 ? 'border-indigo-500/30 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.1)]' : 'border-white/10'}`}
+                    placeholder="R$ 0,00"
+                  />
+                </div>
+
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -535,18 +643,29 @@ export default function Financeiro() {
                 const isPendente = (t.status || 'pago') === 'pendente';
                 const isReceita = t.type === 'receita';
                 
+                // Tratamento especial se for fatura com itens
+                const isFaturaCartao = t.category === 'Cartão de Crédito' && t.description.includes('(');
+                const titleParts = isFaturaCartao ? t.description.split(' (') : [t.description];
+                const mainTitle = titleParts[0];
+                const subTitle = isFaturaCartao ? titleParts[1].replace(')', '') : '';
+                
                 return (
                   <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
-                    <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
                       
-                      <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                      <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 mt-1 sm:mt-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
                         {getCategoryIcon(t.category)}
                       </div>
 
-                      <div className="overflow-hidden">
+                      <div className="flex-1 min-w-0 overflow-hidden">
                         <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
-                          {t.description}
+                          {mainTitle}
                         </div>
+                        {subTitle && (
+                          <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-1 truncate font-medium">
+                            {subTitle}
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
                           <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
                             <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
@@ -563,12 +682,12 @@ export default function Financeiro() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-2.5 sm:mt-0 pt-2.5 sm:pt-0 border-t border-white/5 sm:border-0">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0 shrink-0">
                       <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
                         {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
                       </div>
                       
-                      <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         {isPendente && (
                           <button 
                             onClick={() => toggleTransactionStatus(t.id)}
