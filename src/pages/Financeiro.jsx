@@ -6,22 +6,21 @@ import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
-  Eye, Sparkles, ShoppingCart, Shirt
+  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// CATEGORIAS ULTRA REALISTAS E PRÁTICAS
+// CATEGORIAS COMPACTAS E ABRANGENTES
 const CATEGORIAS_RECEITA = [
-  'Salário', 'Freelance / Serviços', 'Rendimentos / Dividendos', 
-  'Bolsa Acadêmica / Auxílio', 'Cashback / Restituição', 'Vendas', 'Outros'
+  'Salário', 'Freelance', 'Investimentos', 
+  'Bolsa/Auxílio', 'Cashback', 'Vendas', 'Mesada/Doação', 'Outros'
 ];
 
 const CATEGORIAS_DESPESA = [
-  'Moradia (Aluguel/Condomínio)', 'Alimentação (Mercado/Padaria)', 
-  'Refeições (Ifood/Restaurante)', 'Transporte (Uber/Ônibus/Gasolina)', 
-  'Contas Básicas (Água/Luz/Net)', 'Saúde e Farmácia', 'Educação e Cursos', 
-  'Assinaturas (Netflix/Spotify)', 'Lazer e Saídas', 'Vestuário e Cuidados', 
-  'Cartão de Crédito', 'Impostos e Taxas', 'Outros'
+  'Moradia', 'Mercado', 'Alimentação Fora', 'Transporte', 
+  'Contas Fixas', 'Saúde', 'Educação', 'Assinaturas', 
+  'Lazer', 'Cuidados Pessoais', 'Cartão de Crédito', 
+  'Impostos/Taxas', 'Pets', 'Manutenção', 'Presentes', 'Outros'
 ];
 
 const CORES_GRAFICO = ['#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'];
@@ -37,25 +36,29 @@ const MESES = [
 
 const getCategoryIcon = (category) => {
   switch (category) {
-    case 'Moradia (Aluguel/Condomínio)': return <Home size={14} className="text-indigo-400" />;
-    case 'Alimentação (Mercado/Padaria)': return <ShoppingCart size={14} className="text-orange-400" />;
-    case 'Refeições (Ifood/Restaurante)': return <Utensils size={14} className="text-amber-400" />;
-    case 'Transporte (Uber/Ônibus/Gasolina)': return <Car size={14} className="text-sky-400" />;
-    case 'Contas Básicas (Água/Luz/Net)': return <Lightbulb size={14} className="text-yellow-400" />;
-    case 'Saúde e Farmácia': return <HeartPulse size={14} className="text-rose-400" />;
-    case 'Educação e Cursos': return <GraduationCap size={14} className="text-purple-400" />;
-    case 'Assinaturas (Netflix/Spotify)': return <Laptop size={14} className="text-cyan-400" />;
-    case 'Lazer e Saídas': return <PartyPopper size={14} className="text-fuchsia-400" />;
-    case 'Vestuário e Cuidados': return <Shirt size={14} className="text-pink-400" />;
+    case 'Moradia': return <Home size={14} className="text-indigo-400" />;
+    case 'Mercado': return <ShoppingCart size={14} className="text-orange-400" />;
+    case 'Alimentação Fora': return <Utensils size={14} className="text-amber-400" />;
+    case 'Transporte': return <Car size={14} className="text-sky-400" />;
+    case 'Contas Fixas': return <Lightbulb size={14} className="text-yellow-400" />;
+    case 'Saúde': return <HeartPulse size={14} className="text-rose-400" />;
+    case 'Educação': return <GraduationCap size={14} className="text-purple-400" />;
+    case 'Assinaturas': return <Laptop size={14} className="text-cyan-400" />;
+    case 'Lazer': return <PartyPopper size={14} className="text-fuchsia-400" />;
+    case 'Cuidados Pessoais': return <Shirt size={14} className="text-pink-400" />;
     case 'Cartão de Crédito': return <CreditCard size={14} className="text-slate-300" />;
-    case 'Impostos e Taxas': return <Landmark size={14} className="text-slate-400" />;
+    case 'Impostos/Taxas': return <Landmark size={14} className="text-slate-400" />;
+    case 'Pets': return <Heart size={14} className="text-red-400" />;
+    case 'Manutenção': return <Wrench size={14} className="text-slate-400" />;
+    case 'Presentes': return <Gift size={14} className="text-rose-300" />;
     
     case 'Salário': return <Briefcase size={14} className="text-emerald-400" />;
-    case 'Bolsa Acadêmica / Auxílio': return <GraduationCap size={14} className="text-blue-400" />;
-    case 'Freelance / Serviços': return <Code size={14} className="text-teal-400" />;
-    case 'Rendimentos / Dividendos': return <TrendingUp size={14} className="text-green-400" />;
-    case 'Cashback / Restituição': return <RefreshCw size={14} className="text-emerald-300" />;
+    case 'Bolsa/Auxílio': return <GraduationCap size={14} className="text-blue-400" />;
+    case 'Freelance': return <Code size={14} className="text-teal-400" />;
+    case 'Investimentos': return <TrendingUp size={14} className="text-green-400" />;
+    case 'Cashback': return <RefreshCw size={14} className="text-emerald-300" />;
     case 'Vendas': return <Tag size={14} className="text-indigo-300" />;
+    case 'Mesada/Doação': return <Gift size={14} className="text-purple-300" />;
     
     default: return <MoreHorizontal size={14} className="text-slate-400" />;
   }
