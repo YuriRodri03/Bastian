@@ -6,7 +6,7 @@ import { useInboxStore } from '../store/useInboxStore';
 import { 
   Wallet, Dumbbell, Calendar as CalendarIcon, TrendingUp, TrendingDown, 
   ChevronLeft, ChevronRight, Calendar, Target, CheckSquare, Clock, 
-  BarChart3, LayoutGrid 
+  BarChart3, LayoutGrid, Sparkles, Eye 
 } from 'lucide-react';
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -60,6 +60,9 @@ export default function Dashboard() {
   const [filterMonth, setFilterMonth] = useState(currentMonth);
   const [filterYear, setFilterYear] = useState(currentYear);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  
+  // ESTADO DO MODO PROJEÇÃO (Dashboard)
+  const [isProjected, setIsProjected] = useState(false);
 
   const currentDatePointer = useMemo(() => {
     return new Date(Number(filterYear), Number(filterMonth) - 1, 1);
@@ -166,15 +169,28 @@ export default function Dashboard() {
     });
   }, [healthLogs, filterMonth, filterYear]);
 
-  const totalReceitas = filteredTransactions
-    .filter(t => (t.type === 'receita' || t.type === 'income') && (t.status || 'pago') === 'pago')
-    .reduce((acc, t) => acc + Number(t.amount || 0), 0);
+  // CÁLCULOS COM SUPORTE À PROJEÇÃO
+  const { totalReceitas, totalDespesas, saldoTotal } = useMemo(() => {
+    return filteredTransactions.reduce((acc, t) => {
+      const tStatus = t.status || 'pago';
+      const valor = Number(t.amount) || 0;
+      
+      // Se não for projetado, só conta o que tá pago. Se for projetado, conta tudo.
+      const deveContar = isProjected ? true : tStatus === 'pago';
 
-  const totalDespesas = filteredTransactions
-    .filter(t => (t.type === 'despesa' || t.type === 'expense') && (t.status || 'pago') === 'pago')
-    .reduce((acc, t) => acc + Number(t.amount || 0), 0);
+      if (deveContar) {
+        if (t.type === 'receita' || t.type === 'income') {
+          acc.totalReceitas += valor;
+          acc.saldoTotal += valor;
+        } else if (t.type === 'despesa' || t.type === 'expense') {
+          acc.totalDespesas += valor;
+          acc.saldoTotal -= valor;
+        }
+      }
+      return acc;
+    }, { totalReceitas: 0, totalDespesas: 0, saldoTotal: 0 });
+  }, [filteredTransactions, isProjected]);
 
-  const saldoTotal = totalReceitas - totalDespesas;
   const totalTreinos = filteredHealthLogs.filter(l => l.type === 'treino').length;
   
   const ultimoPeso = healthLogs
@@ -193,6 +209,12 @@ export default function Dashboard() {
     const agrupado = filteredTransactions.reduce((acc, t) => {
       const rawDate = t.date || t.created_at;
       if (!rawDate) return acc;
+      
+      const tStatus = t.status || 'pago';
+      const deveContar = isProjected ? true : tStatus === 'pago';
+      
+      if (!deveContar) return acc;
+
       let day, month, year;
       const cleanDate = String(rawDate).substring(0, 10);
       if (cleanDate.includes('/')) {
@@ -212,11 +234,9 @@ export default function Dashboard() {
         acc.push(existing);
       }
       
-      const tStatus = t.status || 'pago';
-      if (tStatus === 'pago') {
-        if (t.type === 'receita' || t.type === 'income') existing.Receitas += Number(t.amount || 0);
-        if (t.type === 'despesa' || t.type === 'expense') existing.Despesas += Number(t.amount || 0);
-      }
+      if (t.type === 'receita' || t.type === 'income') existing.Receitas += Number(t.amount || 0);
+      if (t.type === 'despesa' || t.type === 'expense') existing.Despesas += Number(t.amount || 0);
+      
       return acc;
     }, []);
 
@@ -227,7 +247,7 @@ export default function Dashboard() {
       saldoAcumulado += (item.Receitas - item.Despesas);
       return { ...item, Saldo: saldoAcumulado };
     });
-  }, [filteredTransactions]);
+  }, [filteredTransactions, isProjected]);
 
   const pesoChartData = useMemo(() => {
     return healthLogs
@@ -256,50 +276,67 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* NAVEGADOR TEMPORAL (Estilo Financeiro) */}
-        <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-2xl backdrop-blur-xl shadow-xl flex-wrap sm:flex-nowrap w-full sm:w-auto">
-          <button onClick={handlePrevMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
-            <ChevronLeft size={18} />
-          </button>
+        {/* CONTROLES DE NAVEGAÇÃO E PROJEÇÃO */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap w-full sm:w-auto">
           
-          <div className="flex-1 flex justify-center relative min-w-[140px]" onClick={() => setIsPickerOpen(!isPickerOpen)}>
-            <div className="flex items-center justify-center gap-2 cursor-pointer py-1.5 px-2 hover:text-white transition-colors group">
-              <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="text-sm font-bold text-slate-200 capitalize tracking-wide truncate group-hover:text-white transition-colors">
-                {formattedMonthName}
-              </span>
-            </div>
-            {isPickerOpen && (
-              <input 
-                type="month" 
-                value={formatToMonthInput(currentDatePointer)}
-                onChange={handleMonthInputSelect}
-                onBlur={() => setIsPickerOpen(false)}
-                autoFocus
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-base"
-              />
-            )}
-          </div>
-
-          <button onClick={handleNextMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
-            <ChevronRight size={18} />
+          <button 
+            onClick={() => setIsProjected(!isProjected)}
+            className={`flex-1 sm:flex-none items-center justify-center flex gap-2 px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-lg ${
+              isProjected 
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/30 border border-indigo-500/50' 
+                : 'bg-white/5 text-slate-400 border border-white/10 hover:bg-white/10 hover:text-slate-200'
+            }`}
+          >
+            {isProjected ? <Sparkles size={16} className="animate-pulse"/> : <Eye size={16} />}
+            <span className="hidden sm:inline">{isProjected ? 'Projeção Ativa' : 'Visão Atual'}</span>
+            <span className="sm:hidden">{isProjected ? 'Projeção' : 'Atual'}</span>
           </button>
+
+          {/* NAVEGADOR TEMPORAL */}
+          <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-xl flex-1 sm:flex-none justify-between">
+            <button onClick={handlePrevMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
+              <ChevronLeft size={18} />
+            </button>
+            
+            <div className="flex-1 flex justify-center relative min-w-[120px]" onClick={() => setIsPickerOpen(!isPickerOpen)}>
+              <div className="flex items-center justify-center gap-2 cursor-pointer py-1.5 px-2 hover:text-white transition-colors group">
+                <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="text-sm font-bold text-slate-200 capitalize tracking-wide truncate group-hover:text-white transition-colors">
+                  {formattedMonthName}
+                </span>
+              </div>
+              {isPickerOpen && (
+                <input 
+                  type="month" 
+                  value={formatToMonthInput(currentDatePointer)}
+                  onChange={handleMonthInputSelect}
+                  onBlur={() => setIsPickerOpen(false)}
+                  autoFocus
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full text-base"
+                />
+              )}
+            </div>
+
+            <button onClick={handleNextMonth} className="p-2 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition-colors">
+              <ChevronRight size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
       <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
         
-        {/* BLOCO SUPERIOR: CARDS DE MÉTRICAS */}
-        <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* BLOCO SUPERIOR: CARDS DE MÉTRICAS (GRID OTIMIZADO PARA MOBILE) */}
+        <div className="lg:col-span-12 grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
           <StatCard 
-            title="Saldo no Mês" 
+            title={isProjected ? "Saldo Projetado" : "Saldo no Mês"} 
             icon={Wallet} 
             colorClass="text-emerald-400"
             mainValue={`R$ ${saldoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
             footerContent={
               <>
-                <span className="text-emerald-400 flex items-center gap-1 font-mono text-xs"><TrendingUp size={12} className="shrink-0"/> <span className="truncate">{totalReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></span>
-                <span className="text-rose-400 flex items-center gap-1 font-mono text-xs"><TrendingDown size={12} className="shrink-0"/> <span className="truncate">{totalDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></span>
+                <span className="text-emerald-400 flex items-center gap-1 font-mono text-[10px] sm:text-xs"><TrendingUp size={12} className="shrink-0"/> <span className="truncate">{totalReceitas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></span>
+                <span className="text-rose-400 flex items-center gap-1 font-mono text-[10px] sm:text-xs"><TrendingDown size={12} className="shrink-0"/> <span className="truncate">{totalDespesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></span>
               </>
             }
           />
@@ -308,34 +345,36 @@ export default function Dashboard() {
             title="Treinos no Mês" 
             icon={Dumbbell} 
             colorClass="text-cyan-400"
-            mainValue={<>{totalTreinos} <span className="text-sm font-medium text-slate-400">sessões</span></>}
-            footerContent={<span className="text-xs text-slate-400 truncate">Peso atual: <strong className="font-mono text-cyan-300">{ultimoPeso ? `${ultimoPeso.value} ${ultimoPeso.unit}` : '--'}</strong></span>}
+            mainValue={<>{totalTreinos} <span className="text-xs sm:text-sm font-medium text-slate-400 ml-1">sessões</span></>}
+            footerContent={<span className="text-[10px] sm:text-xs text-slate-400 truncate">Peso atual: <strong className="font-mono text-cyan-300">{ultimoPeso ? `${ultimoPeso.value} ${ultimoPeso.unit}` : '--'}</strong></span>}
           />
 
-          <StatCard 
-            title="Execução Diária" 
-            icon={Target} 
-            colorClass="text-indigo-400"
-            mainValue={`${porcentagemProgresso}%`}
-            subtext={
-              <span className="flex items-center gap-1.5 mt-2">
-                <Clock size={12} className="text-indigo-400 shrink-0" />
-                {proximoEvento ? (
-                  <span className="truncate text-slate-300 text-xs font-medium">Próximo: {proximoEvento.title} ({proximoEvento.time.substring(0,5)})</span>
-                ) : (
-                  <span className="text-slate-500 text-xs truncate">Agenda livre para hoje.</span>
-                )}
-              </span>
-            }
-            footerContent={
-              <div className="w-full bg-black/40 rounded-full h-1.5 mt-2 border border-white/5 overflow-hidden">
-                <div 
-                  className="bg-gradient-to-r from-indigo-600 to-purple-500 h-1.5 rounded-full transition-all duration-700 shadow-[0_0_15px_rgba(99,102,241,0.6)]" 
-                  style={{ width: `${porcentagemProgresso}%` }}
-                ></div>
-              </div>
-            }
-          />
+          <div className="col-span-2 lg:col-span-1">
+            <StatCard 
+              title="Execução Diária" 
+              icon={Target} 
+              colorClass="text-indigo-400"
+              mainValue={`${porcentagemProgresso}%`}
+              subtext={
+                <span className="flex items-center gap-1.5 mt-2">
+                  <Clock size={12} className="text-indigo-400 shrink-0" />
+                  {proximoEvento ? (
+                    <span className="truncate text-slate-300 text-[10px] sm:text-xs font-medium">Próximo: {proximoEvento.title} ({proximoEvento.time.substring(0,5)})</span>
+                  ) : (
+                    <span className="text-slate-500 text-[10px] sm:text-xs truncate">Agenda livre para hoje.</span>
+                  )}
+                </span>
+              }
+              footerContent={
+                <div className="w-full bg-black/40 rounded-full h-1.5 mt-2 border border-white/5 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-indigo-600 to-purple-500 h-1.5 rounded-full transition-all duration-700 shadow-[0_0_15px_rgba(99,102,241,0.6)]" 
+                    style={{ width: `${porcentagemProgresso}%` }}
+                  ></div>
+                </div>
+              }
+            />
+          </div>
         </div>
 
         {/* COLUNA ESQUERDA (FOCO PRINCIPAL) */}
@@ -349,7 +388,8 @@ export default function Dashboard() {
           <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-4 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-emerald-400 shrink-0" /> Inteligência Financeira
+                <Wallet className="w-5 h-5 text-emerald-400 shrink-0" /> 
+                Inteligência Financeira {isProjected && <span className="text-cyan-400 text-xs font-bold uppercase tracking-wider border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 rounded-md ml-2 hidden sm:inline-block">Projeção Ativa</span>}
               </h2>
             </div>
             

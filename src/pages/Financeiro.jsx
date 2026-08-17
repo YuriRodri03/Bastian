@@ -6,7 +6,7 @@ import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
-  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift
+  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -130,6 +130,9 @@ export default function Financeiro() {
   const [cartItems, setCartItems] = useState([]);
   const [cartItemName, setCartItemName] = useState('');
   const [cartItemValue, setCartItemValue] = useState('');
+  
+  // ESTADO PARA EXPANDIR OS DETALHES DA FATURA NA LISTA
+  const [expandedFaturaId, setExpandedFaturaId] = useState(null);
 
   // ESTADO DO MODO PROJEÇÃO
   const [isProjected, setIsProjected] = useState(false);
@@ -142,7 +145,7 @@ export default function Financeiro() {
   useEffect(() => {
     if (!editingId) {
       setCategory(type === 'receita' ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0]);
-      setCartItems([]); // Reseta o carrinho se mudar o tipo
+      setCartItems([]); 
     }
   }, [type, editingId]);
 
@@ -172,7 +175,6 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  // CÁLCULOS SEPARADOS (PAGOS E PENDENTES)
   const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
       const tStatus = t.status || 'pago';
@@ -207,7 +209,6 @@ export default function Financeiro() {
 
   const handleAmountChange = (e) => setAmount(formatCurrency(e.target.value));
 
-  // FUNÇÕES DO CARRINHO
   const handleAddCartItem = () => {
     const val = unmaskCurrency(cartItemValue);
     if (!cartItemName.trim() || !val) return;
@@ -217,7 +218,6 @@ export default function Financeiro() {
     setCartItemName('');
     setCartItemValue('');
 
-    // Atualiza o valor principal travando no total da fatura
     const total = newItems.reduce((acc, curr) => acc + curr.valor, 0);
     setAmount(formatCurrency((total * 100).toFixed(0)));
   };
@@ -233,7 +233,7 @@ export default function Financeiro() {
     e.preventDefault();
     const numericAmount = unmaskCurrency(amount);
     
-    // Se for cartão com itens mas sem descrição, cria um título automático
+    // Constrói a descrição inteligente
     let baseDescription = description;
     if (category === 'Cartão de Crédito' && cartItems.length > 0 && !description) {
       baseDescription = 'Fatura Cartão de Crédito';
@@ -241,10 +241,12 @@ export default function Financeiro() {
 
     if (!numericAmount || !baseDescription) return;
     
-    // Junta os itens do carrinho na descrição final
-    const finalDescription = (category === 'Cartão de Crédito' && cartItems.length > 0)
-      ? `${baseDescription} (${cartItems.map(i => i.nome).join(', ')})`
-      : baseDescription;
+    // Concatena tudo de uma forma que possamos ler depois (Ex: "Fatura [Uber|25.50] [Ifood|50]")
+    let finalDescription = baseDescription;
+    if (category === 'Cartão de Crédito' && cartItems.length > 0) {
+       const strItems = cartItems.map(i => `[${i.nome}|${i.valor}]`).join(' ');
+       finalDescription = `${baseDescription} ${strItems}`;
+    }
     
     const transactionData = {
       id: editingId || Date.now(),
@@ -264,7 +266,14 @@ export default function Financeiro() {
 
   const handleEdit = (t) => {
     setEditingId(t.id);
-    setDescription(t.description);
+    
+    // Tratamento na edição para remover os colchetes caso o usuário vá editar
+    let limpaDesc = t.description;
+    if (t.category === 'Cartão de Crédito' && t.description.includes('[')) {
+       limpaDesc = t.description.split(' [')[0];
+    }
+    setDescription(limpaDesc);
+    
     const stringAmount = t.amount.toFixed(2).replace('.', '');
     setAmount(formatCurrency(stringAmount));
     setType(t.type);
@@ -276,7 +285,7 @@ export default function Financeiro() {
       setDate(t.date || getTodayFormatted());
     }
     setStatus(t.status || 'pago');
-    setCartItems([]); // Resetar carrinho ao editar para não sobrescrever a string pronta
+    setCartItems([]); 
     
     setTimeout(() => {
       if (formRef.current) {
@@ -307,7 +316,7 @@ export default function Financeiro() {
   return (
     <div className="min-h-[calc(100vh-80px)] w-full px-3 py-6 sm:p-8 font-sans flex flex-col items-center overflow-x-hidden box-border max-w-[100vw]">
       
-      {/* Cabeçalho com Filtros */}
+      {/* Cabeçalho */}
       <div className="w-full max-w-7xl mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-gradient-to-br from-indigo-500/20 to-purple-500/10 rounded-2xl border border-indigo-500/20 backdrop-blur-md shadow-lg shadow-indigo-500/10">
@@ -363,7 +372,6 @@ export default function Financeiro() {
 
       {/* 4 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-8">
-        
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
@@ -419,7 +427,6 @@ export default function Financeiro() {
             {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
-
       </div>
 
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -455,7 +462,6 @@ export default function Financeiro() {
                   </select>
                 </div>
 
-                {/* MÓDULO INTELIGENTE DO CARRINHO DE CARTÃO */}
                 {category === 'Cartão de Crédito' && !editingId && (
                   <div className="col-span-1 sm:col-span-2 bg-black/20 p-4 rounded-xl border border-white/5 space-y-3 mt-1 shadow-inner">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -527,7 +533,6 @@ export default function Financeiro() {
                     placeholder="R$ 0,00"
                   />
                 </div>
-
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -647,75 +652,116 @@ export default function Financeiro() {
                 const isReceita = t.type === 'receita';
                 
                 // Tratamento especial se for fatura com itens
-                const isFaturaCartao = t.category === 'Cartão de Crédito' && t.description.includes('(');
-                const titleParts = isFaturaCartao ? t.description.split(' (') : [t.description];
+                const isFaturaCartao = t.category === 'Cartão de Crédito' && t.description.includes('[');
+                const titleParts = isFaturaCartao ? t.description.split(' [') : [t.description];
                 const mainTitle = titleParts[0];
-                const subTitle = isFaturaCartao ? titleParts[1].replace(')', '') : '';
+                
+                // Parseia os itens de "[Nome|10] [Uber|25.5]"
+                let cartaoItens = [];
+                if (isFaturaCartao && titleParts.length > 1) {
+                   const rawItems = t.description.match(/\[(.*?)\|([0-9.]+)\]/g) || [];
+                   cartaoItens = rawItems.map(str => {
+                     const clean = str.replace('[', '').replace(']', '');
+                     const [n, v] = clean.split('|');
+                     return { nome: n, valor: Number(v) };
+                   });
+                }
+                
+                const isExpanded = expandedFaturaId === t.id;
                 
                 return (
-                  <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
-                    <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                      
-                      <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 mt-1 sm:mt-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                        {getCategoryIcon(t.category)}
-                      </div>
-
-                      <div className="flex-1 min-w-0 overflow-hidden">
-                        <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
-                          {mainTitle}
-                        </div>
-                        {subTitle && (
-                          <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-1 truncate font-medium">
-                            {subTitle}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
-                          <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
-                            <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
-                          </span>
-                          <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[100px] sm:max-w-none">
-                            <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
-                          </span>
-                          {isPendente && (
-                            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
-                              A Pagar
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                  <div key={t.id} className={`group flex flex-col p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
                     
-                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0 shrink-0">
-                      <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
-                        {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center w-full">
+                      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                        <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 mt-1 sm:mt-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                          {getCategoryIcon(t.category)}
+                        </div>
+
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
+                            {mainTitle}
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
+                            <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
+                              <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
+                            </span>
+                            <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[100px] sm:max-w-none">
+                              <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
+                            </span>
+                            {isPendente && (
+                              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                                A Pagar
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                       
-                      <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                        {isPendente && (
+                      <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0 shrink-0">
+                        <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
+                        </div>
+                        
+                        <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                          {isFaturaCartao && (
+                            <button 
+                              onClick={() => setExpandedFaturaId(isExpanded ? null : t.id)}
+                              title="Ver Detalhes da Fatura"
+                              className="flex items-center gap-1 p-1.5 sm:p-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest border border-indigo-500/20"
+                            >
+                              {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} 
+                              <span className="hidden sm:inline">Detalhes</span>
+                            </button>
+                          )}
+
+                          {isPendente && (
+                            <button 
+                              onClick={() => toggleTransactionStatus(t.id)}
+                              title="Dar Baixa"
+                              className="flex items-center justify-center p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all border border-emerald-500/20"
+                            >
+                              <CheckCircle2 size={16} />
+                            </button>
+                          )}
                           <button 
-                            onClick={() => toggleTransactionStatus(t.id)}
-                            title="Dar Baixa"
-                            className="flex items-center justify-center p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
+                            onClick={() => handleEdit(t)}
+                            title="Editar"
+                            className="text-slate-400 hover:text-indigo-400 p-1.5 sm:p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
                           >
-                            <CheckCircle2 size={16} />
+                            <Pencil size={16} />
                           </button>
-                        )}
-                        <button 
-                          onClick={() => handleEdit(t)}
-                          title="Editar"
-                          className="text-slate-400 hover:text-indigo-400 p-1.5 sm:p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button 
-                          onClick={() => removeTransaction(t.id)}
-                          title="Excluir"
-                          className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                          <button 
+                            onClick={() => removeTransaction(t.id)}
+                            title="Excluir"
+                            className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                     </div>
+
+                    {/* SUB-PAINEL DE DETALHES DO CARTÃO DE CRÉDITO */}
+                    {isFaturaCartao && isExpanded && (
+                      <div className="mt-4 pt-4 border-t border-white/10 w-full animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="bg-black/30 rounded-xl p-3 sm:p-4 border border-white/5">
+                          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                            <CreditCard size={12}/> Itens Lançados nesta Fatura
+                          </h4>
+                          <div className="space-y-2">
+                            {cartaoItens.map((item, idx) => (
+                              <div key={idx} className="flex justify-between items-center text-xs text-slate-300 border-b border-white/5 pb-2 last:border-0 last:pb-0">
+                                <span className="font-semibold">{item.nome}</span>
+                                <span className="font-mono text-slate-400">R$ {item.valor.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 );
               })

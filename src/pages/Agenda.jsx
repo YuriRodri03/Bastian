@@ -151,15 +151,15 @@ export default function Agenda() {
           </div>
         </div>
 
-        {/* Menu de Abas Segmentado */}
-        <div className="flex items-center bg-black/40 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-inner overflow-x-auto custom-scrollbar w-full sm:w-auto shrink-0">
-          <button onClick={() => setActiveTab('calendar')} className={`flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'calendar' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
+        {/* Menu de Abas Segmentado (Scrollable no Mobile) */}
+        <div className="flex items-center bg-black/40 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-inner overflow-x-auto custom-scrollbar w-full sm:w-auto shrink-0 snap-x">
+          <button onClick={() => setActiveTab('calendar')} className={`snap-center flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'calendar' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
             <CalendarIcon size={16} /> <span className="sm:inline">Calendário</span>
           </button>
-          <button onClick={() => setActiveTab('inbox')} className={`flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'inbox' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
+          <button onClick={() => setActiveTab('inbox')} className={`snap-center flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'inbox' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
             <ListTodo size={16} /> <span className="sm:inline">Inbox Diário</span>
           </button>
-          <button onClick={() => setActiveTab('projects')} className={`flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'projects' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
+          <button onClick={() => setActiveTab('projects')} className={`snap-center flex items-center justify-center gap-2 px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap flex-1 sm:flex-none ${activeTab === 'projects' ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}>
             <Layers size={16} /> <span className="sm:inline">Kanban</span>
           </button>
         </div>
@@ -250,8 +250,8 @@ export default function Agenda() {
                         setSelectedDayModal({ isOpen: true, date: diaAtual });
                       }
                     }}
-                    className={`p-1.5 sm:p-3 border-b border-r border-white/5 hover:bg-white/5 transition-colors group relative flex flex-col min-w-0
-                      ${calendarMode === 'month' ? 'cursor-pointer min-h-[80px] sm:min-h-[120px]' : 'min-h-[400px]'} 
+                    className={`p-1 sm:p-3 border-b border-r border-white/5 hover:bg-white/5 transition-colors group relative flex flex-col min-w-0
+                      ${calendarMode === 'month' ? 'cursor-pointer min-h-[70px] sm:min-h-[120px]' : 'min-h-[400px]'} 
                       ${isCurrentMonth || calendarMode !== 'month' ? 'bg-transparent' : 'bg-black/60'}
                     `}
                   >
@@ -266,13 +266,16 @@ export default function Agenda() {
                           +{totalItens - 2}
                         </span>
                       )}
-                      {calendarMode === 'month' && totalItens > 1 && (
-                        <span className="sm:hidden w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                      
+                      {/* Indicador Mobile: bolinha discreta em vez de texto que estoura a tela */}
+                      {calendarMode === 'month' && totalItens > 0 && (
+                        <span className="sm:hidden w-1.5 h-1.5 rounded-full bg-cyan-400 opacity-80 mt-1 mr-1"></span>
                       )}
                     </div>
                     
-                    <div className="flex flex-col gap-1 overflow-hidden flex-1">
-                      {transacoesDoDia.slice(0, calendarMode === 'month' ? (window.innerWidth < 640 ? 1 : 2) : transacoesDoDia.length).map(transacao => {
+                    {/* Lista que fica oculta/reduzida no mobile no modo Mensal */}
+                    <div className={`flex flex-col gap-1 overflow-hidden flex-1 ${calendarMode === 'month' ? 'hidden sm:flex' : 'flex'}`}>
+                      {transacoesDoDia.slice(0, calendarMode === 'month' ? 2 : transacoesDoDia.length).map(transacao => {
                         const isDespesa = transacao.type === 'despesa';
                         return (
                           <div key={`fin-${transacao.id}`} className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-[9px] sm:text-[10px] font-bold rounded flex justify-between gap-1 items-center overflow-hidden
@@ -285,7 +288,7 @@ export default function Agenda() {
                         );
                       })}
 
-                      {eventosDoDia.slice(0, calendarMode === 'month' ? (window.innerWidth < 640 ? 1 : 2) : eventosDoDia.length).map(evento => (
+                      {eventosDoDia.slice(0, calendarMode === 'month' ? 2 : eventosDoDia.length).map(evento => (
                         <div key={`ev-${evento.id}`} className="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-cyan-500/15 border-l-2 border-cyan-500 text-cyan-200 text-[9px] sm:text-[10px] font-bold rounded overflow-hidden flex items-center gap-1" title={evento.title}>
                           {evento.time && <span className="opacity-70 font-mono tracking-wider shrink-0 hidden sm:inline">{evento.time.substring(0,5)}</span>}
                           <span className="truncate">{evento.title}</span>
