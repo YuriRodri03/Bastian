@@ -149,13 +149,25 @@ export default function Financeiro() {
     }
   }, [type, editingId]);
 
+  // MOTOR TEMPORAL AJUSTADO PARA O FUTURO
   const availableYears = useMemo(() => {
-    const years = transactions.map(t => {
-      return t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
+    const yearsSet = new Set();
+    
+    // Anos baseados nas transações existentes
+    transactions.forEach(t => {
+      if (t.date) {
+        const y = t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
+        if (y) yearsSet.add(y);
+      }
     });
-    const uniqueYears = [...new Set(years)];
-    if (!uniqueYears.includes(currentYear)) uniqueYears.push(currentYear);
-    return uniqueYears.sort((a, b) => b.localeCompare(a));
+
+    // Injeção de Margem: 2 anos passados, ano atual, e 5 anos futuros para planejamento
+    const baseYear = parseInt(currentYear, 10);
+    for (let i = -2; i <= 5; i++) {
+      yearsSet.add(String(baseYear + i));
+    }
+
+    return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [transactions, currentYear]);
 
   const filteredTransactions = useMemo(() => {
@@ -233,7 +245,6 @@ export default function Financeiro() {
     e.preventDefault();
     const numericAmount = unmaskCurrency(amount);
     
-    // Constrói a descrição inteligente
     let baseDescription = description;
     if (category === 'Cartão de Crédito' && cartItems.length > 0 && !description) {
       baseDescription = 'Fatura Cartão de Crédito';
@@ -241,7 +252,6 @@ export default function Financeiro() {
 
     if (!numericAmount || !baseDescription) return;
     
-    // Concatena tudo de uma forma que possamos ler depois (Ex: "Fatura [Uber|25.50] [Ifood|50]")
     let finalDescription = baseDescription;
     if (category === 'Cartão de Crédito' && cartItems.length > 0) {
        const strItems = cartItems.map(i => `[${i.nome}|${i.valor}]`).join(' ');
@@ -267,7 +277,6 @@ export default function Financeiro() {
   const handleEdit = (t) => {
     setEditingId(t.id);
     
-    // Tratamento na edição para remover os colchetes caso o usuário vá editar
     let limpaDesc = t.description;
     if (t.category === 'Cartão de Crédito' && t.description.includes('[')) {
        limpaDesc = t.description.split(' [')[0];
@@ -427,6 +436,7 @@ export default function Financeiro() {
             {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
+
       </div>
 
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -462,6 +472,7 @@ export default function Financeiro() {
                   </select>
                 </div>
 
+                {/* MÓDULO INTELIGENTE DO CARRINHO DE CARTÃO */}
                 {category === 'Cartão de Crédito' && !editingId && (
                   <div className="col-span-1 sm:col-span-2 bg-black/20 p-4 rounded-xl border border-white/5 space-y-3 mt-1 shadow-inner">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">

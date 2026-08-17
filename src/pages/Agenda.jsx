@@ -192,20 +192,21 @@ export default function Agenda() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
+            {/* CONTROLES E BOTÕES: Ajustado para Mobile */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
               {/* Interface do Calendário */}
               {activeTab === 'calendar' ? (
                 <>
                   <select 
                     value={calendarMode}
                     onChange={(e) => setCalendarMode(e.target.value)}
-                    className="bg-black/40 text-xs sm:text-sm font-bold text-slate-200 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+                    className="w-full sm:w-auto bg-black/40 text-xs sm:text-sm font-bold text-slate-200 border border-white/10 rounded-xl py-2.5 px-3 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
                   >
-                    <option value="month" className="bg-slate-900">Mensal</option>
-                    <option value="week" className="bg-slate-900">Semanal</option>
-                    <option value="day" className="bg-slate-900">Diário</option>
+                    <option value="month" className="bg-slate-900">Visão Mensal</option>
+                    <option value="week" className="bg-slate-900">Visão Semanal</option>
+                    <option value="day" className="bg-slate-900">Visão Diária</option>
                   </select>
-                  <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-cyan-500/25 shrink-0 w-full sm:w-auto">
+                  <button onClick={() => setIsModalOpen(true)} className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-4 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-cyan-500/25 shrink-0">
                     <Plus size={16} /> Novo Evento
                   </button>
                 </>
