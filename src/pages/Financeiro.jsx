@@ -6,7 +6,7 @@ import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
-  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift, ChevronDown, ChevronUp
+  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -131,8 +131,8 @@ export default function Financeiro() {
   const [cartItemName, setCartItemName] = useState('');
   const [cartItemValue, setCartItemValue] = useState('');
   
-  // ESTADO PARA EXPANDIR OS DETALHES DA FATURA NA LISTA
-  const [expandedFaturaId, setExpandedFaturaId] = useState(null);
+  // ESTADO PARA O MODAL DA FATURA
+  const [faturaModal, setFaturaModal] = useState({ isOpen: false, transaction: null, items: [] });
 
   // ESTADO DO MODO PROJEÇÃO
   const [isProjected, setIsProjected] = useState(false);
@@ -153,7 +153,6 @@ export default function Financeiro() {
   const availableYears = useMemo(() => {
     const yearsSet = new Set();
     
-    // Anos baseados nas transações existentes
     transactions.forEach(t => {
       if (t.date) {
         const y = t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
@@ -161,7 +160,6 @@ export default function Financeiro() {
       }
     });
 
-    // Injeção de Margem: 2 anos passados, ano atual, e 5 anos futuros para planejamento
     const baseYear = parseInt(currentYear, 10);
     for (let i = -2; i <= 5; i++) {
       yearsSet.add(String(baseYear + i));
@@ -436,7 +434,6 @@ export default function Financeiro() {
             {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
-
       </div>
 
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -678,101 +675,79 @@ export default function Financeiro() {
                    });
                 }
                 
-                const isExpanded = expandedFaturaId === t.id;
-                
                 return (
-                  <div key={t.id} className={`group flex flex-col p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
+                  <div key={t.id} className={`group flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 sm:p-4 bg-black/20 border rounded-xl sm:rounded-2xl transition-all duration-200 hover:shadow-lg ${isPendente ? 'border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-white/5 hover:border-white/10 hover:bg-white/5'}`}>
                     
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center w-full">
-                      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                        <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 mt-1 sm:mt-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                          {getCategoryIcon(t.category)}
-                        </div>
-
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
-                            {mainTitle}
-                          </div>
-                          
-                          <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
-                            <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
-                              <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
-                            </span>
-                            <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[100px] sm:max-w-none">
-                              <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
-                            </span>
-                            {isPendente && (
-                              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
-                                A Pagar
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                    <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                      <div className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border flex items-center justify-center shadow-inner shrink-0 mt-1 sm:mt-0 ${isPendente ? 'bg-amber-500/10 border-amber-500/20' : isReceita ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                        {getCategoryIcon(t.category)}
                       </div>
-                      
-                      <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0 shrink-0">
-                        <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
-                          {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
+
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors truncate">
+                          {mainTitle}
                         </div>
                         
-                        <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                          {isFaturaCartao && (
-                            <button 
-                              onClick={() => setExpandedFaturaId(isExpanded ? null : t.id)}
-                              title="Ver Detalhes da Fatura"
-                              className="flex items-center gap-1 p-1.5 sm:p-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest border border-indigo-500/20"
-                            >
-                              {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} 
-                              <span className="hidden sm:inline">Detalhes</span>
-                            </button>
-                          )}
-
+                        <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">
+                          <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-slate-400">
+                            <Calendar size={10} className="sm:w-[11px] sm:h-[11px]"/> {formatDateToBR(t.date)}
+                          </span>
+                          <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[100px] sm:max-w-none">
+                            <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
+                          </span>
                           {isPendente && (
-                            <button 
-                              onClick={() => toggleTransactionStatus(t.id)}
-                              title="Dar Baixa"
-                              className="flex items-center justify-center p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all border border-emerald-500/20"
-                            >
-                              <CheckCircle2 size={16} />
-                            </button>
+                            <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                              A Pagar
+                            </span>
                           )}
-                          <button 
-                            onClick={() => handleEdit(t)}
-                            title="Editar"
-                            className="text-slate-400 hover:text-indigo-400 p-1.5 sm:p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button 
-                            onClick={() => removeTransaction(t.id)}
-                            title="Excluir"
-                            className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
-                          >
-                            <Trash2 size={16} />
-                          </button>
                         </div>
                       </div>
                     </div>
-
-                    {/* SUB-PAINEL DE DETALHES DO CARTÃO DE CRÉDITO */}
-                    {isFaturaCartao && isExpanded && (
-                      <div className="mt-4 pt-4 border-t border-white/10 w-full animate-in fade-in slide-in-from-top-2 duration-300">
-                        <div className="bg-black/30 rounded-xl p-3 sm:p-4 border border-white/5">
-                          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                            <CreditCard size={12}/> Itens Lançados nesta Fatura
-                          </h4>
-                          <div className="space-y-2">
-                            {cartaoItens.map((item, idx) => (
-                              <div key={idx} className="flex justify-between items-center text-xs text-slate-300 border-b border-white/5 pb-2 last:border-0 last:pb-0">
-                                <span className="font-semibold">{item.nome}</span>
-                                <span className="font-mono text-slate-400">R$ {item.valor.toFixed(2)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                    
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t border-white/5 sm:border-0 shrink-0">
+                      <div className={`font-mono font-bold text-base sm:text-lg tracking-tight ${isPendente ? 'text-amber-400/80' : isReceita ? 'text-emerald-400' : 'text-slate-200'}`}>
+                        {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
                       </div>
-                    )}
+                      
+                      <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                        
+                        {/* Botão de Ver Fatura (Modal) */}
+                        {isFaturaCartao && (
+                          <button 
+                            onClick={() => setFaturaModal({ isOpen: true, transaction: t, items: cartaoItens })}
+                            className="flex items-center gap-1 p-1.5 sm:p-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest border border-indigo-500/20"
+                            title="Ver Fatura"
+                          >
+                            <Eye size={14}/>
+                            <span className="hidden sm:inline">Ver Fatura</span>
+                          </button>
+                        )}
 
+                        {isPendente && (
+                          <button 
+                            onClick={() => toggleTransactionStatus(t.id)}
+                            title="Dar Baixa"
+                            className="flex items-center justify-center p-1.5 sm:p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all border border-emerald-500/20"
+                          >
+                            <CheckCircle2 size={16} />
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => handleEdit(t)}
+                          title="Editar"
+                          className="text-slate-400 hover:text-indigo-400 p-1.5 sm:p-2 rounded-lg hover:bg-indigo-500/10 transition-all"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button 
+                          onClick={() => removeTransaction(t.id)}
+                          title="Excluir"
+                          className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 );
               })
@@ -781,6 +756,40 @@ export default function Financeiro() {
         </div>
         
       </div>
+
+      {/* MODAL DE DETALHES DA FATURA */}
+      {faturaModal.isOpen && faturaModal.transaction && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4">
+          <div className="bg-slate-900 border border-white/10 p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4 shrink-0">
+              <div>
+                <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                  <CreditCard className="text-indigo-400" size={20} />
+                  Detalhes da Fatura
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1 font-medium">{faturaModal.transaction.description.split(' [')[0]}</p>
+              </div>
+              <button onClick={() => setFaturaModal({ isOpen: false, transaction: null, items: [] })} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+              {faturaModal.items.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center bg-white/5 border border-white/5 p-3.5 rounded-xl">
+                  <span className="text-sm font-semibold text-slate-200">{item.nome}</span>
+                  <span className="text-sm font-mono font-bold text-cyan-400">R$ {item.valor.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 pt-5 border-t border-white/10 flex justify-between items-center shrink-0">
+              <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Total Consolidado</span>
+              <span className="text-xl sm:text-2xl font-mono font-bold text-white">R$ {faturaModal.transaction.amount.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
