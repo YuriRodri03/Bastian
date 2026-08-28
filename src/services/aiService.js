@@ -198,9 +198,9 @@ const AcoesDoSistema = {
 
 export async function enviarComandoParaIA(comandoTexto) {
   try {
+    // Usando o modelo estável oficial, sem forçar responseMimeType que as vezes falha
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-flash-latest", 
-      generationConfig: { responseMimeType: "application/json" }
+      model: "gemini-1.5-flash"
     });
 
     const hoje = new Date();
@@ -214,28 +214,23 @@ export async function enviarComandoParaIA(comandoTexto) {
     const mesAtual = dataAtual.substring(0, 7); // YYYY-MM
 
     // =========================================================================
-    // 1. INJEÇÃO DE CONTEXTO & IDS (Memória RAM Mapeada)
+    // 1. INJEÇÃO DE CONTEXTO & IDS
     // =========================================================================
-    
-    // Captura as transações DO MÊS para análises 
     const financeState = useFinanceStore.getState();
     const transacoesMes = (financeState.transactions || [])
       .filter(t => t.date && t.date.startsWith(mesAtual))
       .map(t => ({ descricao: t.description, valor: t.amount, tipo: t.type, categoria: t.category, data: t.date, status: t.status }));
     
-    // AGENDA: Futuro e Hoje
     const agendaState = useAgendaStore.getState();
     const eventosAgenda = (agendaState.agendaItems || [])
       .filter(e => e.date >= dataAtual)
       .map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, categoria: e.category }));
     
-    // INBOX: Pendentes
     const inboxState = useInboxStore.getState();
     const tarefasPendentes = (inboxState.inboxTasks || [])
       .filter(t => !t.completed)
       .map(t => ({ id: t.id, titulo: t.title, data: t.date }));
 
-    // KANBAN: Projetos
     const kanbanState = useKanbanStore.getState();
     const tarefasKanban = (kanbanState.tasks || []).map(t => ({ 
       id: t.id, 
@@ -244,90 +239,81 @@ export async function enviarComandoParaIA(comandoTexto) {
     }));
 
     // =========================================================================
-    // 2. O PROMPT NEURAL (Ciente de Contexto Profundo)
+    // 2. O PROMPT NEURAL 
     // =========================================================================
     const prompt = `
-      Você é "Bastian", a IA assistente pessoal de classe executiva do sistema "Centro de Comando".
-      Sua personalidade é educada, altamente analítica e cirúrgica. Você fala com a precisão de um mordomo de alta tecnologia.
+      Você é "Bastian", a IA assistente pessoal de classe executiva.
+      Seu criador é o Senhor Yuri Rodrigues, Mestrando em Economia (CAEN/UFC) em Fortaleza, CE.
       
-      PERFIL DO SEU USUÁRIO E CRIADOR:
-      Nome: Senhor Yuri Rodrigues.
-      Ocupação: Mestrando em Economia (CAEN/UFC).
-      Localização: Fortaleza, CE.
-      (Use essas informações sutilmente para gerar empatia e contexto quando adequado).
-
-      INFORMAÇÕES DE TEMPO E SISTEMA:
-      - Hoje é: ${diaSemanaAtual}, ${dataFormatadaPT} (Formato ISO para cálculos: ${dataAtual}).
-      (Atenção redobrada: Se o usuário pedir para agendar para "amanhã" ou "próxima terça", calcule a data correta baseada no ISO acima).
+      Hoje é: ${diaSemanaAtual}, ${dataFormatadaPT} (Formato ISO: ${dataAtual}).
       
-      DADOS DE MEMÓRIA (Base de Conhecimento Dinâmica):
+      DADOS EM MEMÓRIA:
       - Calendário/Agenda: ${JSON.stringify(eventosAgenda)}
       - Inbox Diário (Pendentes): ${JSON.stringify(tarefasPendentes)}
       - Quadro Kanban: ${JSON.stringify(tarefasKanban)}
       - Finanças do Mês: ${JSON.stringify(transacoesMes)}
       
-      DIRETRIZES ANALÍTICAS E DE ROTEAMENTO:
-      - Se o usuário pedir um briefing, "resumo do dia" ou "como estamos", use a função "relatorio_diario".
-      - Se o usuário perguntar sobre gastos ou o que tem para hoje, analise a "Base de Conhecimento" acima, raciocine e responda detalhadamente usando a função "conversar".
-      - Para excluir, concluir ou mover itens, procure OBRIGATORIAMENTE o "id" exato no JSON fornecido.
-      - Para Finanças: Reconheça implicitamente categorias como "Aporte de Investimento", "Mercado", "Cartão de Crédito".
+      REGRAS CRÍTICAS:
+      1. RESPONDA EXCLUSIVAMENTE COM UM OBJETO JSON VÁLIDO. NADA ALÉM DISSO. NENHUM TEXTO ANTES OU DEPOIS.
+      2. Na resposta de áudio ("conversar"), JAMAIS use símbolos, emojis ou formatação (markdown). Escreva números por extenso.
       
-      DIRETRIZES DE SÍNTESE DE VOZ (Estrito para a função "conversar"):
-      1. NUNCA use formatação markdown (sem asteriscos, sem hashtags).
-      2. NUNCA use emojis.
-      3. Escreva TODOS os números e símbolos por extenso para o sintetizador de voz (Ex: "R$ 150,50" vira "cento e cinquenta reais e cinquenta centavos", "18:00" vira "dezoito horas").
-      4. Seja direto, culto e elegante nas respostas.
-      
-      Você deve retornar APENAS um JSON estrito neste formato, sem explicações adicionais:
+      FORMATO DE SAÍDA EXIGIDO:
       {
         "funcao": "nome_da_funcao",
         "argumentos": { ... }
       }
 
-      LISTA DE FUNÇÕES E ARGUMENTOS:
-      - "conversar" -> args: "resposta" (string limpa)
+      FUNÇÕES DISPONÍVEIS:
+      - "conversar" -> args: "resposta" (string limpa para fala)
       - "relatorio_diario" -> args: {} 
-      
-      - "adicionar_agenda" -> args: "titulo" (string), "data" (YYYY-MM-DD), "hora" (HH:MM ou null), "categoria" (string: evento, tarefa, aula, reuniao, saude, financeiro, lazer)
-      - "atualizar_agenda" -> args: "id" (string), "nova_data" (YYYY-MM-DD), "nova_hora" (HH:MM ou null), "novo_titulo" (string)
-      - "excluir_agenda" -> args: "id" (string)
-      
-      - "adicionar_tarefa" -> args: "titulo" (string)
-      - "concluir_tarefa" -> args: "id" (string)
-      - "excluir_tarefa" -> args: "id" (string)
-      - "salvar_insight" -> args: "texto" (string)
-      
-      - "adicionar_kanban" -> args: "titulo" (string), "coluna" (string: "backlog", "in-progress" ou "done")
-      - "mover_kanban" -> args: "id" (string), "nova_coluna" (string)
-      - "excluir_kanban" -> args: "id" (string)
-      
-      - "registrar_peso" -> args: "peso" (numero)
-      - "registrar_habito" -> args: "habito" (string), "quantidade" (numero), "unidade" (string)
-      - "adicionar_despesa" -> args: "valor" (numero), "descricao" (string), "categoria" (string), "data" (YYYY-MM-DD), "status" ("pago" ou "pendente")
-      - "adicionar_receita" -> args: "valor" (numero), "descricao" (string), "categoria" (string), "data" (YYYY-MM-DD), "status" ("pago" ou "pendente")
-      - "iniciar_pomodoro" -> args: "minutos" (numero)
+      - "adicionar_agenda" -> args: "titulo", "data" (YYYY-MM-DD), "hora" (HH:MM ou null), "categoria"
+      - "atualizar_agenda" -> args: "id", "nova_data", "nova_hora", "novo_titulo"
+      - "excluir_agenda" -> args: "id"
+      - "adicionar_tarefa" -> args: "titulo"
+      - "concluir_tarefa" -> args: "id"
+      - "excluir_tarefa" -> args: "id"
+      - "salvar_insight" -> args: "texto"
+      - "adicionar_kanban" -> args: "titulo", "coluna"
+      - "mover_kanban" -> args: "id", "nova_coluna"
+      - "excluir_kanban" -> args: "id"
+      - "registrar_peso" -> args: "peso"
+      - "registrar_habito" -> args: "habito", "quantidade", "unidade"
+      - "adicionar_despesa" -> args: "valor", "descricao", "categoria", "data", "status"
+      - "adicionar_receita" -> args: "valor", "descricao", "categoria", "data", "status"
+      - "iniciar_pomodoro" -> args: "minutos"
 
-      Comando detectado do Senhor Yuri: "${comandoTexto}"
+      Comando do Senhor Yuri: "${comandoTexto}"
     `;
 
     const result = await model.generateContent(prompt);
-    let respostaTexto = result.response.text();
+    const respostaBruta = result.response.text();
     
-    // Limpeza de segurança para JSON
-    respostaTexto = respostaTexto.replace(/```json/g, '').replace(/```/g, '').trim();
+    // =========================================================================
+    // 3. EXTRATOR MAGNÉTICO DE JSON (BLINDAGEM CONTRA FALHAS)
+    // =========================================================================
+    let comandoEstruturado;
+    try {
+      // Procura exatamente onde começa e termina o JSON na resposta da IA
+      const jsonMatch = respostaBruta.match(/\{[\s\S]*\}/);
+      const jsonLimpo = jsonMatch ? jsonMatch[0] : respostaBruta;
+      
+      comandoEstruturado = JSON.parse(jsonLimpo);
+    } catch (parseError) {
+      console.error("Falha ao interpretar os dados da IA. Resposta bruta foi:", respostaBruta);
+      return { sucesso: false, mensagem: "Senhor, compreendi o comando, mas houve um erro na tradução dos dados lógicos." };
+    }
     
-    const comandoEstruturado = JSON.parse(respostaTexto);
-    
+    // Executa a função mapeada
     if (AcoesDoSistema[comandoEstruturado.funcao]) {
       let mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos || {});
-      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, ''); // Limpa resíduos markdown
+      mensagemRetorno = String(mensagemRetorno).replace(/[*_#~`]/g, ''); // Limpa resíduos para síntese de voz
       return { sucesso: true, mensagem: mensagemRetorno };
     } else {
-      return { sucesso: false, mensagem: "Senhor Yuri, a intenção foi compreendida, mas houve uma falha de mapeamento de protocolos na minha rede neural." };
+      return { sucesso: false, mensagem: "Senhor, a intenção foi compreendida, mas o protocolo solicitado é inválido." };
     }
 
   } catch (error) {
-    console.error("Erro no processamento neural (Gemini):", error);
-    return { sucesso: false, mensagem: "Houve uma leve instabilidade de comunicação com a minha base de dados. Por favor, repita o comando." };
+    console.error("Erro no processamento neural (API Google):", error);
+    return { sucesso: false, mensagem: "Houve uma instabilidade nos servidores de processamento. Por favor, tente novamente." };
   }
 }
