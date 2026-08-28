@@ -129,14 +129,16 @@ export default function Financeiro() {
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
 
+  // ESTADOS DO CARRINHO DE CARTÃO DE CRÉDITO
   const [cartItems, setCartItems] = useState([]);
   const [cartItemName, setCartItemName] = useState('');
   const [cartItemValue, setCartItemValue] = useState('');
   const [expandedFaturaId, setExpandedFaturaId] = useState(null);
   const [faturaModal, setFaturaModal] = useState({ isOpen: false, transaction: null, items: [] });
 
+  // ESTADOS GERAIS E FILTROS
   const [isProjected, setIsProjected] = useState(false);
-  const [chartType, setChartType] = useState('despesa');
+  const [chartType, setChartType] = useState('despesa'); // 'receita', 'despesa', 'investimento'
 
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -182,33 +184,71 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  // CÁLCULO GERAL: Investimentos e Saldo respeitando a Projeção!
-  const totalInvestido = useMemo(() => {
+  // =========================================================================
+  // MOTOR DE CÁLCULO FINANCEIRO INTELIGENTE (Corrigido para Projeção por Mês)
+  // =========================================================================
+
+  // 1. CÁLCULO DOS TOTAIS REAIS (Histórico completo, APENAS o que já foi efetivamente pago)
+  const { saldoRealTotal, investidoRealTotal } = useMemo(() => {
     return transactions.reduce((acc, t) => {
-      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
-      if (deveContar) {
-        if (t.category === 'Aporte de Investimento') return acc + Number(t.amount);
-        if (t.category === 'Resgate de Investimento') return acc - Number(t.amount);
+      if ((t.status || 'pago') === 'pago') {
+        const valor = Number(t.amount) || 0;
+        if (t.type === 'receita') acc.saldoRealTotal += valor;
+        if (t.type === 'despesa') acc.saldoRealTotal -= valor;
+        
+        if (t.category === 'Aporte de Investimento') acc.investidoRealTotal += valor;
+        if (t.category === 'Resgate de Investimento') acc.investidoRealTotal -= valor;
       }
       return acc;
-    }, 0);
-  }, [transactions, isProjected]);
+    }, { saldoRealTotal: 0, investidoRealTotal: 0 });
+  }, [transactions]);
 
-  const saldoGlobal = useMemo(() => {
-    return transactions.reduce((acc, t) => {
-      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
-      if (deveContar) {
-        if (t.type === 'receita') return acc + Number(t.amount);
-        if (t.type === 'despesa') return acc - Number(t.amount);
+  // 2. CÁLCULO DO PERÍODO SELECIONADO (Mês atual filtrado na tela)
+  const { receitasPagas, despesasPagas, aPagar, aReceber, aportesPendentesMes, resgatesPendentesMes } = useMemo(() => {
+    return filteredTransactions.reduce((acc, t) => {
+      const tStatus = t.status || 'pago';
+      const valor = Number(t.amount) || 0;
+      
+      if (t.type === 'receita') {
+        if (tStatus === 'pago') acc.receitasPagas += valor;
+        else {
+          acc.aReceber += valor;
+          if (t.category === 'Resgate de Investimento') acc.resgatesPendentesMes += valor;
+        }
+      } else {
+        if (tStatus === 'pago') acc.despesasPagas += valor;
+        else {
+          acc.aPagar += valor;
+          if (t.category === 'Aporte de Investimento') acc.aportesPendentesMes += valor;
+        }
       }
       return acc;
-    }, 0);
-  }, [transactions, isProjected]);
+    }, { receitasPagas: 0, despesasPagas: 0, aPagar: 0, aReceber: 0, aportesPendentesMes: 0, resgatesPendentesMes: 0 });
+  }, [filteredTransactions]);
 
+  // 3. CONSOLIDAÇÃO FINAL PARA OS CARDS DA TELA
+  const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
+  const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
+  const displayBalancoMensal = displayReceitas - displayDespesas; // Balanço EXCLUSIVO do mês selecionado
+
+  // O Saldo Global agora só adiciona a projeção DAQUELE MÊS SELECIONADO (Não mistura com os próximos 5 anos)
+  const displaySaldoGlobal = isProjected 
+    ? saldoRealTotal + aReceber - aPagar 
+    : saldoRealTotal;
+
+  const displayTotalInvestido = isProjected
+    ? investidoRealTotal + aportesPendentesMes - resgatesPendentesMes
+    : investidoRealTotal;
+
+  // 4. DETALHAMENTO DA CARTEIRA PARA O GRÁFICO (Histórico pago + Pendências do mês se projetado)
   const carteiraInvestimentos = useMemo(() => {
     const ativos = {};
     transactions.forEach(t => {
-      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
+      const isPaid = (t.status || 'pago') === 'pago';
+      const isPendingInFilter = !isPaid && filteredTransactions.some(ft => ft.id === t.id); // Só inclui se estiver no filtro atual
+      
+      const deveContar = isProjected ? (isPaid || isPendingInFilter) : isPaid;
+
       if (deveContar) {
         const nomeAtivo = t.description.trim();
         if (t.category === 'Aporte de Investimento') {
@@ -223,28 +263,7 @@ export default function Financeiro() {
       .map(([name, value]) => ({ name, value }))
       .filter(ativo => ativo.value > 0.01)
       .sort((a, b) => b.value - a.value);
-  }, [transactions, isProjected]);
-
-  const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
-    return filteredTransactions.reduce((acc, t) => {
-      const tStatus = t.status || 'pago';
-      const valor = Number(t.amount) || 0;
-      
-      if (t.type === 'receita') {
-        if (tStatus === 'pago') acc.receitasPagas += valor;
-        else acc.aReceber += valor;
-      } else {
-        if (tStatus === 'pago') acc.despesasPagas += valor;
-        else acc.aPagar += valor;
-      }
-      
-      return acc;
-    }, { receitasPagas: 0, despesasPagas: 0, aPagar: 0, aReceber: 0 });
-  }, [filteredTransactions]);
-
-  const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
-  const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
-  const displayBalancoMensal = displayReceitas - displayDespesas;
+  }, [transactions, isProjected, filteredTransactions]);
 
   const chartData = useMemo(() => {
     if (chartType === 'investimento') return carteiraInvestimentos;
@@ -430,7 +449,7 @@ export default function Financeiro() {
       {/* 5 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-5 mb-6 sm:mb-8">
         
-        {/* CARD DE INVESTIMENTOS */}
+        {/* CARD DE INVESTIMENTOS (Global com Projeção Inteligente) */}
         <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
@@ -441,7 +460,7 @@ export default function Financeiro() {
             </div>
           </div>
           <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 text-emerald-400`}>
-            {totalInvestido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            {displayTotalInvestido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
 
@@ -487,7 +506,7 @@ export default function Financeiro() {
           </div>
         </div>
 
-        {/* CARD MESTRE: SALDO GERAL */}
+        {/* CARD MESTRE: SALDO GERAL (Resolve o problema da transição de meses) */}
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
@@ -498,8 +517,8 @@ export default function Financeiro() {
             </div>
           </div>
           
-          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${saldoGlobal >= 0 ? 'text-white' : 'text-rose-400'}`}>
-            {saldoGlobal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${displaySaldoGlobal >= 0 ? 'text-white' : 'text-rose-400'}`}>
+            {displaySaldoGlobal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
           
           <div className="text-[10px] sm:text-xs font-semibold mt-1.5 sm:mt-2 text-slate-400 truncate relative z-10">
