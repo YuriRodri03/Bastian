@@ -200,7 +200,7 @@ export async function enviarComandoParaIA(comandoTexto) {
   try {
     // Usando o modelo estável oficial, sem forçar responseMimeType que as vezes falha
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash"
+      model: "gemini-3.6-flash"
     });
 
     const hoje = new Date();
