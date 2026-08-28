@@ -129,16 +129,14 @@ export default function Financeiro() {
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
 
-  // ESTADOS DO CARRINHO DE CARTÃO DE CRÉDITO
   const [cartItems, setCartItems] = useState([]);
   const [cartItemName, setCartItemName] = useState('');
   const [cartItemValue, setCartItemValue] = useState('');
   const [expandedFaturaId, setExpandedFaturaId] = useState(null);
   const [faturaModal, setFaturaModal] = useState({ isOpen: false, transaction: null, items: [] });
 
-  // ESTADOS GERAIS
   const [isProjected, setIsProjected] = useState(false);
-  const [chartType, setChartType] = useState('despesa'); // 'receita', 'despesa', 'investimento'
+  const [chartType, setChartType] = useState('despesa');
 
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -184,34 +182,34 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  // CÁLCULO GLOBAL DE INVESTIMENTOS
+  // CÁLCULO GERAL: Investimentos e Saldo respeitando a Projeção!
   const totalInvestido = useMemo(() => {
     return transactions.reduce((acc, t) => {
-      if ((t.status || 'pago') === 'pago') {
+      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
+      if (deveContar) {
         if (t.category === 'Aporte de Investimento') return acc + Number(t.amount);
         if (t.category === 'Resgate de Investimento') return acc - Number(t.amount);
       }
       return acc;
     }, 0);
-  }, [transactions]);
+  }, [transactions, isProjected]);
 
-  // CÁLCULO DO SALDO GLOBAL (Dinheiro real na conta até hoje)
   const saldoGlobal = useMemo(() => {
     return transactions.reduce((acc, t) => {
-      // O Saldo Global só contabiliza o que já foi "pago"
-      if ((t.status || 'pago') === 'pago') {
+      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
+      if (deveContar) {
         if (t.type === 'receita') return acc + Number(t.amount);
         if (t.type === 'despesa') return acc - Number(t.amount);
       }
       return acc;
     }, 0);
-  }, [transactions]);
+  }, [transactions, isProjected]);
 
-  // DETALHAMENTO DA CARTEIRA DE INVESTIMENTOS
   const carteiraInvestimentos = useMemo(() => {
     const ativos = {};
     transactions.forEach(t => {
-      if ((t.status || 'pago') === 'pago') {
+      const deveContar = isProjected ? true : (t.status || 'pago') === 'pago';
+      if (deveContar) {
         const nomeAtivo = t.description.trim();
         if (t.category === 'Aporte de Investimento') {
           ativos[nomeAtivo] = (ativos[nomeAtivo] || 0) + Number(t.amount);
@@ -223,9 +221,9 @@ export default function Financeiro() {
     
     return Object.entries(ativos)
       .map(([name, value]) => ({ name, value }))
-      .filter(ativo => ativo.value > 0.01) // ignora zerados
+      .filter(ativo => ativo.value > 0.01)
       .sort((a, b) => b.value - a.value);
-  }, [transactions]);
+  }, [transactions, isProjected]);
 
   const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
@@ -246,10 +244,8 @@ export default function Financeiro() {
 
   const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
   const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
-  // Balanço é exclusivo do mês
   const displayBalancoMensal = displayReceitas - displayDespesas;
 
-  // DADOS DINÂMICOS DO GRÁFICO
   const chartData = useMemo(() => {
     if (chartType === 'investimento') return carteiraInvestimentos;
 
@@ -434,7 +430,7 @@ export default function Financeiro() {
       {/* 5 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-5 mb-6 sm:mb-8">
         
-        {/* CARD DE INVESTIMENTOS (Global) */}
+        {/* CARD DE INVESTIMENTOS */}
         <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
@@ -491,7 +487,7 @@ export default function Financeiro() {
           </div>
         </div>
 
-        {/* CARD MESTRE: SALDO GERAL (Resolve o problema da transição de meses) */}
+        {/* CARD MESTRE: SALDO GERAL */}
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
@@ -676,35 +672,35 @@ export default function Financeiro() {
             </form>
           </div>
 
-          {/* ÁREA DO GRÁFICO COM INTERRUPTORES */}
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[340px] sm:h-[400px] flex flex-col hidden md:flex transition-all">
+          {/* ÁREA DO GRÁFICO OTIMIZADA PARA MOBILE */}
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[450px] flex flex-col transition-all">
             
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-white/10 pb-3">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-3 mb-4 border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2 min-w-0">
                 <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                 <h2 className="text-sm sm:text-base font-bold text-white truncate">
                   {chartType === 'despesa' ? 'Mapa de Despesas' : chartType === 'receita' ? 'Mapa de Receitas' : 'Sua Carteira'}
-                  {isProjected && chartType !== 'investimento' && <span className="text-cyan-400 text-xs ml-1">(Projetado)</span>}
+                  {isProjected && <span className="text-cyan-400 text-xs ml-1">(Projetado)</span>}
                 </h2>
               </div>
               
-              {/* TOGGLE MÚLTIPLO: DESPESAS / RECEITAS / INVESTIMENTOS */}
-              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 shrink-0">
+              {/* TOGGLE MÚLTIPLO 100% RESPONSIVO */}
+              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 w-full">
                 <button 
                   onClick={() => setChartType('despesa')}
-                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'despesa' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 whitespace-nowrap px-2 py-1.5 text-[10px] sm:text-[11px] font-bold rounded-md transition-all ${chartType === 'despesa' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   Despesas
                 </button>
                 <button 
                   onClick={() => setChartType('receita')}
-                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 whitespace-nowrap px-2 py-1.5 text-[10px] sm:text-[11px] font-bold rounded-md transition-all ${chartType === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   Receitas
                 </button>
                 <button 
                   onClick={() => setChartType('investimento')}
-                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'investimento' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 whitespace-nowrap px-2 py-1.5 text-[10px] sm:text-[11px] font-bold rounded-md transition-all ${chartType === 'investimento' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   Carteira
                 </button>
@@ -722,9 +718,9 @@ export default function Financeiro() {
                     <Pie
                       data={chartData}
                       cx="50%"
-                      cy="45%"
-                      innerRadius={60}
-                      outerRadius={80}
+                      cy="35%"
+                      innerRadius={65}
+                      outerRadius={85}
                       paddingAngle={4}
                       dataKey="value"
                       stroke="none"
@@ -737,9 +733,10 @@ export default function Financeiro() {
                     <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
                     <Legend 
                       verticalAlign="bottom" 
-                      height={40} 
+                      height={80} 
                       iconType="circle"
-                      formatter={(value) => <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 ml-1 truncate" title={value}>{value}</span>}
+                      wrapperStyle={{ paddingTop: '10px' }}
+                      formatter={(value) => <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 ml-1">{value}</span>}
                     />
                   </PieChart>
                 </ResponsiveContainer>
