@@ -23,6 +23,7 @@ export default function Agenda() {
   const [calendarMode, setCalendarMode] = useState('month'); 
   
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // ESTADO DO NOVO EVENTO (MANTIDO O PADRÃO ORIGINAL DO SEU BANCO DE DADOS)
   const [newItem, setNewItem] = useState({ title: '', date: '', time: '', category: 'evento' });
   const [editingId, setEditingId] = useState(null);
 
@@ -88,7 +89,6 @@ export default function Agenda() {
     fetchInboxTasks();
   }, [fetchAgendaItems, fetchTransactions, fetchKanbanTasks, fetchInboxTasks]);
 
-  // LÓGICA DO INBOX DIÁRIO INTEGRADO À DATA
   const currentSelectedDateString = format(currentDate, 'yyyy-MM-dd');
   
   const tarefasDoDiaSelecionado = useMemo(() => {
@@ -165,14 +165,23 @@ export default function Agenda() {
         </div>
       </div>
 
-      <main className="w-full max-w-7xl flex-1 flex flex-col">
+      <main className="w-full max-w-7xl flex-1 flex flex-col relative">
         
-        {/* ================= NAVEGAÇÃO DE DATA GLOBAL COM CONSCIÊNCIA DE CONTEXTO ================= */}
+        {/* BOTÃO FLUTUANTE (FAB) PARA MOBILE */}
+        {activeTab === 'calendar' && (
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="sm:hidden fixed bottom-24 right-5 z-[90] w-14 h-14 bg-cyan-600 rounded-full shadow-[0_4px_20px_rgba(6,182,212,0.5)] flex items-center justify-center text-white hover:bg-cyan-500 active:scale-95 transition-all"
+          >
+            <Plus size={28} />
+          </button>
+        )}
+
+        {/* ================= NAVEGAÇÃO DE DATA GLOBAL ================= */}
         {(activeTab === 'calendar' || activeTab === 'inbox') && (
           <div className="w-full flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20 p-4 sm:p-5 border border-white/10 rounded-t-2xl sm:rounded-t-3xl transition-all">
             <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-5 w-full md:w-auto">
               
-              {/* Título dinâmico baseado na aba */}
               <h2 className="text-lg sm:text-xl font-bold text-white capitalize text-center sm:text-left min-w-[200px] flex items-center justify-center sm:justify-start gap-2">
                 {activeTab === 'inbox' ? <><CheckSquare size={20} className="text-cyan-400"/> Tarefas do Dia</> : renderHeaderTitle()}
               </h2>
@@ -180,7 +189,6 @@ export default function Agenda() {
               <div className="flex items-center justify-center gap-2 bg-white/5 p-1 rounded-xl border border-white/5 w-full sm:w-auto">
                 <button onClick={prevPeriod} className="p-2 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"><ChevronLeft size={18} /></button>
                 
-                {/* Mostra o dia exato no seletor apenas na aba Inbox */}
                 {activeTab === 'inbox' && (
                   <span className="px-3 py-1 text-sm font-bold text-cyan-300 capitalize min-w-[90px] text-center tracking-wide">
                     {format(currentDate, "dd MMM", { locale: ptBR })}
@@ -192,9 +200,7 @@ export default function Agenda() {
               </div>
             </div>
 
-            {/* CONTROLES E BOTÕES: Ajustado para Mobile */}
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
-              {/* Interface do Calendário */}
               {activeTab === 'calendar' ? (
                 <>
                   <select 
@@ -206,12 +212,13 @@ export default function Agenda() {
                     <option value="week" className="bg-slate-900">Visão Semanal</option>
                     <option value="day" className="bg-slate-900">Visão Diária</option>
                   </select>
-                  <button onClick={() => setIsModalOpen(true)} className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-4 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shadow-cyan-500/25 shrink-0">
+                  
+                  {/* Botão de Novo Evento OCULTO no mobile (agora usa o FAB) */}
+                  <button onClick={() => setIsModalOpen(true)} className="hidden sm:flex items-center justify-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg shrink-0">
                     <Plus size={16} /> Novo Evento
                   </button>
                 </>
               ) : (
-                /* Interface do Inbox */
                 <span className="text-xs font-bold text-slate-400 bg-black/40 px-4 py-2 rounded-xl border border-white/5 w-full sm:w-auto text-center flex items-center justify-center gap-2">
                   <ListTodo size={14} className="text-cyan-500" />
                   {tarefasDoDiaSelecionado.filter(t => !t.completed).length} pendentes
@@ -268,13 +275,11 @@ export default function Agenda() {
                         </span>
                       )}
                       
-                      {/* Indicador Mobile: bolinha discreta em vez de texto que estoura a tela */}
                       {calendarMode === 'month' && totalItens > 0 && (
                         <span className="sm:hidden w-1.5 h-1.5 rounded-full bg-cyan-400 opacity-80 mt-1 mr-1"></span>
                       )}
                     </div>
                     
-                    {/* Lista que fica oculta/reduzida no mobile no modo Mensal */}
                     <div className={`flex flex-col gap-1 overflow-hidden flex-1 ${calendarMode === 'month' ? 'hidden sm:flex' : 'flex'}`}>
                       {transacoesDoDia.slice(0, calendarMode === 'month' ? 2 : transacoesDoDia.length).map(transacao => {
                         const isDespesa = transacao.type === 'despesa';
@@ -540,46 +545,93 @@ export default function Agenda() {
         </div>
       )}
 
-      {/* ================= MODAL DE FORMULÁRIO (CRIAR E EDITAR EVENTOS) ================= */}
+      {/* ================= MODAL "GOOGLE CALENDAR STYLE" PARA EVENTOS ================= */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-white/10 p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
-              <h3 className="text-base sm:text-lg font-bold text-white">
-                {editingId ? 'Editar Evento' : 'Novo Evento'}
-              </h3>
-              <button onClick={fecharModalFormulario} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors"><X size={20} /></button>
+        <form 
+          onSubmit={handleAddSubmit}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-[100] sm:p-4"
+        >
+          {/* O painel sobe de baixo no mobile (bottom sheet) e centraliza no desktop */}
+          <div className="bg-[#1e2330] w-full max-w-md sm:rounded-3xl rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom-full sm:zoom-in-95 duration-200 border border-white/5 max-h-[90vh]">
+            
+            {/* Cabeçalho Limpo (Apenas X e Salvar) */}
+            <div className="flex justify-between items-center px-4 py-3 border-b border-white/5 bg-[#171b26] sm:rounded-t-3xl rounded-t-3xl shrink-0">
+              <button type="button" onClick={fecharModalFormulario} className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors">
+                <X size={22} />
+              </button>
+              <button 
+                type="submit"
+                disabled={agendaLoading || !newItem.title.trim()}
+                className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white px-6 py-2 rounded-full text-sm font-bold transition-all shadow-md active:scale-95"
+              >
+                {agendaLoading ? 'Salvando...' : 'Salvar'}
+              </button>
             </div>
             
-            <form onSubmit={handleAddSubmit} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Título</label>
-                <input required type="text" value={newItem.title} onChange={(e) => setNewItem({...newItem, title: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 placeholder:text-slate-600 transition-all" placeholder="Ex: Reunião de Projeto" />
+            {/* Corpo do Formulário */}
+            <div className="p-6 overflow-y-auto space-y-7 pb-10 custom-scrollbar">
+              
+              {/* Título Gigante (Sem label) */}
+              <div className="pl-10">
+                <input 
+                  autoFocus
+                  required 
+                  type="text" 
+                  value={newItem.title} 
+                  onChange={(e) => setNewItem({...newItem, title: e.target.value})} 
+                  className="w-full bg-transparent border-b border-transparent hover:border-white/10 focus:border-cyan-500 text-2xl text-white placeholder:text-slate-500 pb-2 outline-none transition-colors" 
+                  placeholder="Adicionar título" 
+                />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Data</label>
-                  <input required type="date" value={newItem.date} onChange={(e) => setNewItem({...newItem, date: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 [color-scheme:dark] transition-all" />
+
+              {/* Data e Hora agrupados com ícone único */}
+              <div className="flex items-start gap-4">
+                <Clock className="text-slate-400 mt-2 shrink-0" size={24} />
+                <div className="flex-1 flex flex-col sm:flex-row gap-3">
+                  <div className="flex-1">
+                    <input 
+                      required 
+                      type="date" 
+                      value={newItem.date} 
+                      onChange={(e) => setNewItem({...newItem, date: e.target.value})} 
+                      className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
+                    />
+                  </div>
+                  <div className="w-full sm:w-32">
+                    <input 
+                      type="time" 
+                      value={newItem.time} 
+                      onChange={(e) => setNewItem({...newItem, time: e.target.value})} 
+                      className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Hora</label>
-                  <input type="time" value={newItem.time} onChange={(e) => setNewItem({...newItem, time: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 [color-scheme:dark] transition-all" />
+              </div>
+
+              {/* Categoria com ícone único */}
+              <div className="flex items-center gap-4">
+                <Tag className="text-slate-400 shrink-0" size={24} />
+                <div className="flex-1">
+                  <select 
+                    value={newItem.category} 
+                    onChange={(e) => setNewItem({...newItem, category: e.target.value})} 
+                    className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer transition-all appearance-none"
+                  >
+                    <option value="evento" className="bg-slate-900">Evento / Compromisso</option>
+                    <option value="tarefa" className="bg-slate-900">Tarefa</option>
+                    <option value="aula" className="bg-slate-900">Aula / Estudo</option>
+                    <option value="reuniao" className="bg-slate-900">Trabalho / Reunião</option>
+                    <option value="saude" className="bg-slate-900">Saúde / Médico</option>
+                    <option value="financeiro" className="bg-slate-900">Financeiro / Pagamento</option>
+                    <option value="lazer" className="bg-slate-900">Lazer / Social</option>
+                    <option value="lembrete" className="bg-slate-900">Lembrete</option>
+                  </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Categoria</label>
-                <select value={newItem.category} onChange={(e) => setNewItem({...newItem, category: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3.5 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 cursor-pointer transition-all">
-                  <option value="evento" className="bg-slate-900">Evento / Compromisso</option>
-                  <option value="tarefa" className="bg-slate-900">Tarefa</option>
-                  <option value="aula" className="bg-slate-900">Aula</option>
-                </select>
-              </div>
-              <button type="submit" disabled={agendaLoading} className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-sm p-4 rounded-xl mt-6 shadow-lg shadow-cyan-500/25 transition-all flex items-center justify-center gap-2">
-                {agendaLoading ? (editingId ? 'Atualizando...' : 'Salvando...') : (editingId ? <><Edit2 size={18}/> Atualizar Evento</> : <><Plus size={18}/> Salvar no Calendário</>)}
-              </button>
-            </form>
+              
+            </div>
           </div>
-        </div>
+        </form>
       )}
     </div>
   );

@@ -17,35 +17,47 @@ const AcoesDoSistema = {
     const inboxPendentes = useInboxStore.getState().inboxTasks.filter(t => !t.completed && (!t.date || t.date === hoje));
     
     const transacoes = useFinanceStore.getState().transactions || [];
-    const saldo = transacoes.reduce((acc, t) => {
-      if ((t.status || 'pago') !== 'pago') return acc;
-      return (t.type === 'receita' || t.type === 'income') ? acc + t.amount : acc - t.amount;
-    }, 0);
+    
+    // Calcula Saldo e Investimentos globais
+    let saldo = 0;
+    let investido = 0;
+    
+    transacoes.forEach(t => {
+      if ((t.status || 'pago') === 'pago') {
+        if (t.type === 'receita') saldo += t.amount;
+        if (t.type === 'despesa') saldo -= t.amount;
+        if (t.category === 'Aporte de Investimento') investido += t.amount;
+        if (t.category === 'Resgate de Investimento') investido -= t.amount;
+      }
+    });
     
     const healthLogs = useFitnessStore.getState().healthLogs || [];
     const ultimoPeso = healthLogs.filter(l => l.type === 'peso').sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
-    let resumo = `Bom dia, senhor Yuri. Aqui está o seu panorama operacional. `;
+    let resumo = `Iniciando briefing operacional, senhor Yuri. `;
     
     if (agendaHoje.length > 0) {
-      resumo += `Temos ${agendaHoje.length} compromissos marcados para hoje. `;
+      resumo += `O seu calendário indica ${agendaHoje.length} compromissos para hoje. `;
     } else {
       resumo += `Sua agenda de eventos está livre hoje. `;
     }
     
     if (inboxPendentes.length > 0) {
-      resumo += `Existem ${inboxPendentes.length} tarefas prioritárias na sua lista diária. `;
+      resumo += `Há ${inboxPendentes.length} tarefas pendentes aguardando sua ação. `;
     } else {
-      resumo += `Sua caixa de tarefas está limpa. `;
+      resumo += `Sua caixa de tarefas está zerada. `;
     }
     
-    resumo += `O saldo atual do caixa é de ${saldo.toFixed(2)} reais. `;
+    resumo += `No panorama financeiro, seu saldo em conta é de ${saldo.toFixed(2)} reais, `;
+    if (investido > 0) {
+      resumo += `com um patrimônio investido de ${investido.toFixed(2)} reais. `;
+    }
     
     if (ultimoPeso) {
-      resumo += `E seu último registro corporal foi de ${ultimoPeso.value} quilos. `;
+      resumo += `Seu último registro físico consta com ${ultimoPeso.value} quilos. `;
     }
     
-    resumo += `Como deseja prosseguir?`;
+    resumo += `Os sistemas estão operando em capacidade máxima. Como deseja prosseguir?`;
     
     return resumo;
   },
@@ -55,12 +67,12 @@ const AcoesDoSistema = {
   // ==========================================
   registrar_peso: (args) => {
     useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', args.peso, 'kg');
-    return `Peso de ${args.peso} quilos atualizado no sistema, senhor.`;
+    return `Peso de ${args.peso} quilos atualizado na base de dados, senhor.`;
   },
 
   registrar_habito: (args) => {
     useFitnessStore.getState().addHealthLog('habito', args.habito, args.quantidade || 1, args.unidade || 'vez');
-    return `Hábito "${args.habito}" registrado no seu histórico de performance.`;
+    return `Hábito "${args.habito}" registrado no seu histórico.`;
   },
   
   adicionar_despesa: (args) => {
@@ -70,10 +82,10 @@ const AcoesDoSistema = {
       amount: Number(args.valor),
       description: args.descricao,
       category: args.categoria || 'Outros',
-      date: new Date().toISOString().split('T')[0], 
-      status: 'pago' 
+      date: args.data || new Date().toISOString().split('T')[0], 
+      status: args.status || 'pago' 
     });
-    return `Despesa de ${args.valor} reais referente a ${args.descricao} foi registrada no painel financeiro.`;
+    return `Despesa de ${args.valor} reais classificada como ${args.categoria || 'Outros'} foi registrada no painel.`;
   },
 
   adicionar_receita: (args) => {
@@ -83,14 +95,14 @@ const AcoesDoSistema = {
       amount: Number(args.valor),
       description: args.descricao,
       category: args.categoria || 'Outros',
-      date: new Date().toISOString().split('T')[0], 
-      status: 'pago' 
+      date: args.data || new Date().toISOString().split('T')[0], 
+      status: args.status || 'pago' 
     });
-    return `Excelente. A receita de ${args.valor} reais referente a ${args.descricao} foi adicionada ao seu caixa.`;
+    return `Receita de ${args.valor} reais contabilizada com sucesso no seu caixa.`;
   },
 
   iniciar_pomodoro: (args) => {
-    return `Modo de foco ativado. Cronômetro Pomodoro configurado para ${args.minutos} minutos. Bom trabalho, senhor.`;
+    return `Modo de foco ativado. Cronômetro configurado para ${args.minutos} minutos. Tenha uma excelente sessão de estudos, senhor.`;
   },
 
   // ==========================================
@@ -107,13 +119,13 @@ const AcoesDoSistema = {
     });
     const msgHora = args.hora ? ` às ${args.hora}` : '';
     const dataFormatada = args.data.split('-').reverse().join('/');
-    return `Entendido. "${args.titulo}" adicionado à sua agenda para ${dataFormatada}${msgHora}.`;
+    return `Entendido. Agendei "${args.titulo}" para ${dataFormatada}${msgHora}.`;
   },
 
   excluir_agenda: (args) => {
     const { deleteAgendaItem } = useAgendaStore.getState();
     deleteAgendaItem(args.id);
-    return `O compromisso foi excluído do seu calendário.`;
+    return `O compromisso foi removido do seu calendário.`;
   },
 
   atualizar_agenda: (args) => {
@@ -123,7 +135,7 @@ const AcoesDoSistema = {
       time: args.nova_hora ? `${args.nova_hora}:00` : undefined,
       title: args.novo_titulo 
     });
-    return `A agenda foi atualizada conforme solicitado, senhor.`;
+    return `Agenda atualizada conforme solicitado.`;
   },
 
   // ==========================================
@@ -133,26 +145,26 @@ const AcoesDoSistema = {
     const { addInboxTask } = useInboxStore.getState();
     const dataHoje = new Date().toISOString().split('T')[0];
     addInboxTask(`[Insight] ${args.texto}`, dataHoje);
-    return `Ideia capturada e salva na sua caixa de entrada, senhor.`;
+    return `Insight devidamente capturado e armazenado, senhor.`;
   },
 
   adicionar_tarefa: (args) => {
     const { addInboxTask } = useInboxStore.getState();
     const dataHoje = new Date().toISOString().split('T')[0];
     addInboxTask(args.titulo, dataHoje);
-    return `A tarefa "${args.titulo}" foi adicionada à sua caixa de entrada de hoje.`;
+    return `A tarefa "${args.titulo}" foi adicionada à sua fila de processamento diário.`;
   },
 
   concluir_tarefa: (args) => {
     const { toggleInboxTask } = useInboxStore.getState();
     toggleInboxTask(args.id, false);
-    return `Excelente, senhor. Tarefa marcada como concluída.`;
+    return `Concluído. Menos uma pendência na sua lista.`;
   },
 
   excluir_tarefa: (args) => {
     const { deleteInboxTask } = useInboxStore.getState();
     deleteInboxTask(args.id);
-    return `Tarefa removida da sua lista de pendências.`;
+    return `Tarefa descartada com sucesso.`;
   },
 
   // ==========================================
@@ -161,19 +173,19 @@ const AcoesDoSistema = {
   adicionar_kanban: (args) => {
     const { addTask } = useKanbanStore.getState();
     addTask(args.titulo, args.coluna || 'backlog');
-    return `O cartão "${args.titulo}" foi criado no quadro Kanban.`;
+    return `Projeto estruturado. O cartão "${args.titulo}" foi criado no Kanban.`;
   },
 
   mover_kanban: (args) => {
     const { moveTask } = useKanbanStore.getState();
     moveTask(args.id, args.nova_coluna);
-    return `O cartão foi movido para a nova coluna no projeto.`;
+    return `Fluxo de trabalho atualizado. O cartão foi movido.`;
   },
 
   excluir_kanban: (args) => {
     const { deleteTask } = useKanbanStore.getState();
     deleteTask(args.id);
-    return `O cartão foi excluído do quadro Kanban definitivamente.`;
+    return `Cartão removido do painel de projetos.`;
   },
 
   // ==========================================
@@ -197,116 +209,125 @@ export async function enviarComandoParaIA(comandoTexto) {
     const dataAtual = dataLocal.toISOString().split('T')[0]; 
     const dataFormatadaPT = dataLocal.toLocaleDateString('pt-BR');
     
+    const diasDaSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const diaSemanaAtual = diasDaSemana[dataLocal.getDay()];
     const mesAtual = dataAtual.substring(0, 7); // YYYY-MM
 
     // =========================================================================
     // 1. INJEÇÃO DE CONTEXTO & IDS (Memória RAM Mapeada)
     // =========================================================================
     
-    // Captura as transações DO MÊS para permitir análises e perguntas sobre gastos
+    // Captura as transações DO MÊS para análises 
     const financeState = useFinanceStore.getState();
     const transacoesMes = (financeState.transactions || [])
       .filter(t => t.date && t.date.startsWith(mesAtual))
-      .map(t => ({ descricao: t.description, valor: t.amount, tipo: t.type, categoria: t.category, data: t.date }));
+      .map(t => ({ descricao: t.description, valor: t.amount, tipo: t.type, categoria: t.category, data: t.date, status: t.status }));
     
-    // AGENDA: Mapeia apenas eventos futuros ou de hoje com IDs
+    // AGENDA: Futuro e Hoje
     const agendaState = useAgendaStore.getState();
     const eventosAgenda = (agendaState.agendaItems || [])
       .filter(e => e.date >= dataAtual)
-      .map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time }));
+      .map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, categoria: e.category }));
     
-    // INBOX DIÁRIO: Tarefas pendentes
+    // INBOX: Pendentes
     const inboxState = useInboxStore.getState();
     const tarefasPendentes = (inboxState.inboxTasks || [])
       .filter(t => !t.completed)
       .map(t => ({ id: t.id, titulo: t.title, data: t.date }));
 
-    // KANBAN: Tarefas organizadas no quadro de projetos
+    // KANBAN: Projetos
     const kanbanState = useKanbanStore.getState();
     const tarefasKanban = (kanbanState.tasks || []).map(t => ({ 
       id: t.id, 
       titulo: t.title, 
-      coluna_atual: t.status // 'backlog', 'in-progress' ou 'done'
+      coluna_atual: t.status
     }));
 
     // =========================================================================
-    // 2. O PROMPT CIENTE DO CONTEXTO
+    // 2. O PROMPT NEURAL (Ciente de Contexto Profundo)
     // =========================================================================
     const prompt = `
-      Você é "Bastian", a IA assistente pessoal avançada do sistema "Centro de Comando".
-      Seu criador e usuário é o senhor Yuri. Sua personalidade é educada, altamente analítica e cirúrgica, semelhante a um mordomo de alta tecnologia.
+      Você é "Bastian", a IA assistente pessoal de classe executiva do sistema "Centro de Comando".
+      Sua personalidade é educada, altamente analítica e cirúrgica. Você fala com a precisão de um mordomo de alta tecnologia.
       
-      INFORMAÇÕES DE SISTEMA:
-      - Data de hoje: ${dataFormatadaPT} (Formato ISO: ${dataAtual}).
-      
-      DADOS ATUAIS DO USUÁRIO (Base de Conhecimento):
-      - Calendário/Agenda (Futuros): ${JSON.stringify(eventosAgenda)}
-      - Inbox Diário (Pendentes): ${JSON.stringify(tarefasPendentes)}
-      - Quadro Kanban (Projetos): ${JSON.stringify(tarefasKanban)}
-      - Finanças do Mês Atual: ${JSON.stringify(transacoesMes)}
-      
-      DIRETRIZES CRÍTICAS DE MANIPULAÇÃO:
-      - Se o usuário pedir o "relatório de hoje", "briefing", ou "resumo do dia", use a função "relatorio_diario".
-      - Se o usuário perguntar sobre gastos ou dados específicos ("Quanto gastei com X?", "O que tenho agendado?"), analise os "DADOS ATUAIS DO USUÁRIO" acima, faça os cálculos necessários e responda usando a função "conversar".
-      - Para excluir, concluir, atualizar ou mover um item existente (Agenda, Inbox ou Kanban), OBRIGATORIAMENTE procure o "id" exato no JSON fornecido acima e passe-o no argumento.
-      - As colunas válidas para o Kanban são: "backlog", "in-progress" e "done".
+      PERFIL DO SEU USUÁRIO E CRIADOR:
+      Nome: Senhor Yuri Rodrigues.
+      Ocupação: Mestrando em Economia (CAEN/UFC).
+      Localização: Fortaleza, CE.
+      (Use essas informações sutilmente para gerar empatia e contexto quando adequado).
 
-      DIRETRIZES DE SÍNTESE DE VOZ (Para a função "conversar"):
-      1. NUNCA use formatação markdown (sem asteriscos, sem negritos).
-      2. NUNCA use emojis.
-      3. ESCREVA NÚMEROS E SÍMBOLOS POR EXTENSO (Ex: "R$ 1500" vira "mil e quinhentos reais", "18:00" vira "dezoito horas", "10%" vira "dez por cento").
-      4. Seja direto, assertivo e elegante nas respostas.
+      INFORMAÇÕES DE TEMPO E SISTEMA:
+      - Hoje é: ${diaSemanaAtual}, ${dataFormatadaPT} (Formato ISO para cálculos: ${dataAtual}).
+      (Atenção redobrada: Se o usuário pedir para agendar para "amanhã" ou "próxima terça", calcule a data correta baseada no ISO acima).
       
-      Sua tarefa é retornar APENAS um JSON estrito no formato:
+      DADOS DE MEMÓRIA (Base de Conhecimento Dinâmica):
+      - Calendário/Agenda: ${JSON.stringify(eventosAgenda)}
+      - Inbox Diário (Pendentes): ${JSON.stringify(tarefasPendentes)}
+      - Quadro Kanban: ${JSON.stringify(tarefasKanban)}
+      - Finanças do Mês: ${JSON.stringify(transacoesMes)}
+      
+      DIRETRIZES ANALÍTICAS E DE ROTEAMENTO:
+      - Se o usuário pedir um briefing, "resumo do dia" ou "como estamos", use a função "relatorio_diario".
+      - Se o usuário perguntar sobre gastos ou o que tem para hoje, analise a "Base de Conhecimento" acima, raciocine e responda detalhadamente usando a função "conversar".
+      - Para excluir, concluir ou mover itens, procure OBRIGATORIAMENTE o "id" exato no JSON fornecido.
+      - Para Finanças: Reconheça implicitamente categorias como "Aporte de Investimento", "Mercado", "Cartão de Crédito".
+      
+      DIRETRIZES DE SÍNTESE DE VOZ (Estrito para a função "conversar"):
+      1. NUNCA use formatação markdown (sem asteriscos, sem hashtags).
+      2. NUNCA use emojis.
+      3. Escreva TODOS os números e símbolos por extenso para o sintetizador de voz (Ex: "R$ 150,50" vira "cento e cinquenta reais e cinquenta centavos", "18:00" vira "dezoito horas").
+      4. Seja direto, culto e elegante nas respostas.
+      
+      Você deve retornar APENAS um JSON estrito neste formato, sem explicações adicionais:
       {
         "funcao": "nome_da_funcao",
         "argumentos": { ... }
       }
 
-      Lista de Funções e Argumentos exigidos:
-      - "conversar" -> args: "resposta" (string formatada para áudio sem símbolos)
-      - "relatorio_diario" -> args: {} (vazio)
+      LISTA DE FUNÇÕES E ARGUMENTOS:
+      - "conversar" -> args: "resposta" (string limpa)
+      - "relatorio_diario" -> args: {} 
       
-      - "adicionar_agenda" -> args: "titulo" (string), "data" (YYYY-MM-DD), "hora" (HH:MM ou null)
-      - "atualizar_agenda" -> args: "id" (string dos dados), "nova_data" (YYYY-MM-DD), "nova_hora" (HH:MM ou null), "novo_titulo" (string)
-      - "excluir_agenda" -> args: "id" (string dos dados)
+      - "adicionar_agenda" -> args: "titulo" (string), "data" (YYYY-MM-DD), "hora" (HH:MM ou null), "categoria" (string: evento, tarefa, aula, reuniao, saude, financeiro, lazer)
+      - "atualizar_agenda" -> args: "id" (string), "nova_data" (YYYY-MM-DD), "nova_hora" (HH:MM ou null), "novo_titulo" (string)
+      - "excluir_agenda" -> args: "id" (string)
       
       - "adicionar_tarefa" -> args: "titulo" (string)
-      - "concluir_tarefa" -> args: "id" (string dos dados)
-      - "excluir_tarefa" -> args: "id" (string dos dados)
-      - "salvar_insight" -> args: "texto" (string - use para ideias/anotações rápidas)
+      - "concluir_tarefa" -> args: "id" (string)
+      - "excluir_tarefa" -> args: "id" (string)
+      - "salvar_insight" -> args: "texto" (string)
       
       - "adicionar_kanban" -> args: "titulo" (string), "coluna" (string: "backlog", "in-progress" ou "done")
-      - "mover_kanban" -> args: "id" (string dos dados), "nova_coluna" (string)
-      - "excluir_kanban" -> args: "id" (string dos dados)
+      - "mover_kanban" -> args: "id" (string), "nova_coluna" (string)
+      - "excluir_kanban" -> args: "id" (string)
       
       - "registrar_peso" -> args: "peso" (numero)
       - "registrar_habito" -> args: "habito" (string), "quantidade" (numero), "unidade" (string)
-      - "adicionar_despesa" -> args: "valor" (numero), "descricao" (string)
-      - "adicionar_receita" -> args: "valor" (numero), "descricao" (string)
+      - "adicionar_despesa" -> args: "valor" (numero), "descricao" (string), "categoria" (string), "data" (YYYY-MM-DD), "status" ("pago" ou "pendente")
+      - "adicionar_receita" -> args: "valor" (numero), "descricao" (string), "categoria" (string), "data" (YYYY-MM-DD), "status" ("pago" ou "pendente")
       - "iniciar_pomodoro" -> args: "minutos" (numero)
 
-      Comando do usuário: "${comandoTexto}"
+      Comando detectado do Senhor Yuri: "${comandoTexto}"
     `;
 
     const result = await model.generateContent(prompt);
     let respostaTexto = result.response.text();
     
-    // Limpeza de segurança 
+    // Limpeza de segurança para JSON
     respostaTexto = respostaTexto.replace(/```json/g, '').replace(/```/g, '').trim();
     
     const comandoEstruturado = JSON.parse(respostaTexto);
     
     if (AcoesDoSistema[comandoEstruturado.funcao]) {
       let mensagemRetorno = AcoesDoSistema[comandoEstruturado.funcao](comandoEstruturado.argumentos || {});
-      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, ''); // Limpa resíduos para síntese de voz
+      mensagemRetorno = mensagemRetorno.replace(/[*_#~]/g, ''); // Limpa resíduos markdown
       return { sucesso: true, mensagem: mensagemRetorno };
     } else {
-      return { sucesso: false, mensagem: "Senhor, a intenção foi compreendida, mas os protocolos de execução deste módulo falharam." };
+      return { sucesso: false, mensagem: "Senhor Yuri, a intenção foi compreendida, mas houve uma falha de mapeamento de protocolos na minha rede neural." };
     }
 
   } catch (error) {
     console.error("Erro no processamento neural (Gemini):", error);
-    return { sucesso: false, mensagem: "Houve uma instabilidade na minha rede neural. Por favor, tente novamente." };
+    return { sucesso: false, mensagem: "Houve uma leve instabilidade de comunicação com a minha base de dados. Por favor, repita o comando." };
   }
 }
