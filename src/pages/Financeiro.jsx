@@ -7,7 +7,7 @@ import {
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
   Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift, ChevronDown, ChevronUp,
-  PiggyBank, ArrowUpFromLine, ArrowDownToLine
+  PiggyBank, ArrowUpFromLine, ArrowDownToLine, Landmark as Bank
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -138,7 +138,7 @@ export default function Financeiro() {
 
   // ESTADOS GERAIS
   const [isProjected, setIsProjected] = useState(false);
-  const [chartType, setChartType] = useState('despesa'); // 'receita' ou 'despesa'
+  const [chartType, setChartType] = useState('despesa'); // 'receita', 'despesa', 'investimento'
 
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -184,7 +184,7 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
-  // CÁLCULO GLOBAL DE INVESTIMENTOS (Todo o histórico)
+  // CÁLCULO GLOBAL DE INVESTIMENTOS
   const totalInvestido = useMemo(() => {
     return transactions.reduce((acc, t) => {
       if ((t.status || 'pago') === 'pago') {
@@ -193,6 +193,38 @@ export default function Financeiro() {
       }
       return acc;
     }, 0);
+  }, [transactions]);
+
+  // CÁLCULO DO SALDO GLOBAL (Dinheiro real na conta até hoje)
+  const saldoGlobal = useMemo(() => {
+    return transactions.reduce((acc, t) => {
+      // O Saldo Global só contabiliza o que já foi "pago"
+      if ((t.status || 'pago') === 'pago') {
+        if (t.type === 'receita') return acc + Number(t.amount);
+        if (t.type === 'despesa') return acc - Number(t.amount);
+      }
+      return acc;
+    }, 0);
+  }, [transactions]);
+
+  // DETALHAMENTO DA CARTEIRA DE INVESTIMENTOS
+  const carteiraInvestimentos = useMemo(() => {
+    const ativos = {};
+    transactions.forEach(t => {
+      if ((t.status || 'pago') === 'pago') {
+        const nomeAtivo = t.description.trim();
+        if (t.category === 'Aporte de Investimento') {
+          ativos[nomeAtivo] = (ativos[nomeAtivo] || 0) + Number(t.amount);
+        } else if (t.category === 'Resgate de Investimento') {
+          ativos[nomeAtivo] = (ativos[nomeAtivo] || 0) - Number(t.amount);
+        }
+      }
+    });
+    
+    return Object.entries(ativos)
+      .map(([name, value]) => ({ name, value }))
+      .filter(ativo => ativo.value > 0.01) // ignora zerados
+      .sort((a, b) => b.value - a.value);
   }, [transactions]);
 
   const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
@@ -204,7 +236,6 @@ export default function Financeiro() {
         if (tStatus === 'pago') acc.receitasPagas += valor;
         else acc.aReceber += valor;
       } else {
-        // Se for Aporte de Investimento, conta como despesa no balanço do mês (dinheiro saiu da conta)
         if (tStatus === 'pago') acc.despesasPagas += valor;
         else acc.aPagar += valor;
       }
@@ -215,9 +246,13 @@ export default function Financeiro() {
 
   const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
   const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
-  const displayBalanco = displayReceitas - displayDespesas;
+  // Balanço é exclusivo do mês
+  const displayBalancoMensal = displayReceitas - displayDespesas;
 
+  // DADOS DINÂMICOS DO GRÁFICO
   const chartData = useMemo(() => {
+    if (chartType === 'investimento') return carteiraInvestimentos;
+
     const listFilter = filteredTransactions.filter(t => t.type === chartType && (isProjected ? true : (t.status || 'pago') === 'pago'));
     const agrupado = listFilter.reduce((acc, transacao) => {
       const index = acc.findIndex(item => item.name === transacao.category);
@@ -226,7 +261,7 @@ export default function Financeiro() {
       return acc;
     }, []);
     return agrupado.sort((a, b) => b.value - a.value);
-  }, [filteredTransactions, isProjected, chartType]);
+  }, [filteredTransactions, isProjected, chartType, carteiraInvestimentos]);
 
   const handleAmountChange = (e) => setAmount(formatCurrency(e.target.value));
 
@@ -289,7 +324,6 @@ export default function Financeiro() {
     let limpaDesc = t.description;
     let extractedCartItems = [];
 
-    // Magia da Re-edição: Pega os dados brutos e refaz a lista do carrinho
     if (t.category === 'Cartão de Crédito' && t.description.includes('[')) {
        limpaDesc = t.description.split(' [')[0];
        const rawItems = t.description.match(/\[(.*?)\|([0-9.]+)\]/g) || [];
@@ -370,7 +404,9 @@ export default function Financeiro() {
           </button>
 
           <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-xl flex-1 sm:flex-none">
-            <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block"><Filter size={16} /></div>
+            <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block">
+              <Filter size={16} />
+            </div>
             <select 
               value={filterMonth}
               onChange={(e) => setFilterMonth(e.target.value)}
@@ -397,6 +433,22 @@ export default function Financeiro() {
 
       {/* 5 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-5 mb-6 sm:mb-8">
+        
+        {/* CARD DE INVESTIMENTOS (Global) */}
+        <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
+              Total Investido
+            </span>
+            <div className="p-1.5 sm:p-2.5 bg-emerald-500/20 rounded-lg sm:rounded-xl shrink-0">
+              <PiggyBank className="text-emerald-300 w-3 h-3 sm:w-5 sm:h-5" />
+            </div>
+          </div>
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 text-emerald-400`}>
+            {totalInvestido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
+        </div>
+
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
@@ -439,32 +491,23 @@ export default function Financeiro() {
           </div>
         </div>
 
+        {/* CARD MESTRE: SALDO GERAL (Resolve o problema da transição de meses) */}
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
-              Balanço Mês
+              Saldo em Conta
             </span>
             <div className="p-1.5 sm:p-2.5 bg-indigo-500/20 rounded-lg sm:rounded-xl shrink-0">
-              <DollarSign className="text-indigo-300 w-3 h-3 sm:w-5 sm:h-5" />
+              <Bank className="text-indigo-300 w-3 h-3 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${displayBalanco >= 0 ? 'text-white' : 'text-rose-400'}`}>
-            {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 ${saldoGlobal >= 0 ? 'text-white' : 'text-rose-400'}`}>
+            {saldoGlobal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
-        </div>
-
-        {/* CARD DE INVESTIMENTOS (Global) */}
-        <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
-          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
-            <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
-              Total Investido
-            </span>
-            <div className="p-1.5 sm:p-2.5 bg-emerald-500/20 rounded-lg sm:rounded-xl shrink-0">
-              <PiggyBank className="text-emerald-300 w-3 h-3 sm:w-5 sm:h-5" />
-            </div>
-          </div>
-          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 text-emerald-400`}>
-            {totalInvestido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          
+          <div className="text-[10px] sm:text-xs font-semibold mt-1.5 sm:mt-2 text-slate-400 truncate relative z-10">
+            Balanço do Mês: <span className={displayBalancoMensal >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{displayBalancoMensal >= 0 ? '+' : ''}{displayBalancoMensal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
           </div>
         </div>
 
@@ -553,13 +596,20 @@ export default function Financeiro() {
                 )}
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Descrição (Opcional se usar Carrinho)</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
+                    {category.includes('Investimento') ? 'Nome do Ativo (ex: Tesouro Selic)' : 'Descrição (Opcional se usar Carrinho)'}
+                  </label>
                   <input 
                     type="text"
+                    required={category.includes('Investimento')}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
-                    placeholder={category === 'Cartão de Crédito' ? "Ex: Fatura Nubank" : "Ex: Aluguel, Supermercado..."}
+                    placeholder={
+                      category === 'Cartão de Crédito' ? "Ex: Fatura Nubank" : 
+                      category.includes('Investimento') ? "Ex: CDB Banco Inter" : 
+                      "Ex: Aluguel, Supermercado..."
+                    }
                   />
                 </div>
 
@@ -626,29 +676,37 @@ export default function Financeiro() {
             </form>
           </div>
 
+          {/* ÁREA DO GRÁFICO COM INTERRUPTORES */}
           <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[340px] sm:h-[400px] flex flex-col hidden md:flex transition-all">
             
-            <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-white/10 pb-3">
               <div className="flex items-center gap-2">
-                <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5" />
-                <h2 className="text-sm sm:text-base font-bold text-white">
-                  Distribuição {isProjected && <span className="text-cyan-400 text-xs">(Projetada)</span>}
+                <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                <h2 className="text-sm sm:text-base font-bold text-white truncate">
+                  {chartType === 'despesa' ? 'Mapa de Despesas' : chartType === 'receita' ? 'Mapa de Receitas' : 'Sua Carteira'}
+                  {isProjected && chartType !== 'investimento' && <span className="text-cyan-400 text-xs ml-1">(Projetado)</span>}
                 </h2>
               </div>
               
-              {/* TOGGLE: DESPESAS VS RECEITAS */}
-              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
+              {/* TOGGLE MÚLTIPLO: DESPESAS / RECEITAS / INVESTIMENTOS */}
+              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 shrink-0">
                 <button 
                   onClick={() => setChartType('despesa')}
-                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${chartType === 'despesa' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'despesa' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   Despesas
                 </button>
                 <button 
                   onClick={() => setChartType('receita')}
-                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${chartType === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   Receitas
+                </button>
+                <button 
+                  onClick={() => setChartType('investimento')}
+                  className={`px-2.5 sm:px-3 py-1 text-[9px] sm:text-[10px] font-bold rounded-md transition-all ${chartType === 'investimento' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Carteira
                 </button>
               </div>
             </div>
@@ -656,7 +714,7 @@ export default function Financeiro() {
             <div className="flex-1 w-full relative">
               {chartData.length === 0 ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs sm:text-sm text-center px-4">
-                  Sem {chartType === 'receita' ? 'receitas' : 'despesas'} neste período.
+                  Sem dados para {chartType} neste {chartType === 'investimento' ? 'histórico' : 'período'}.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -681,7 +739,7 @@ export default function Financeiro() {
                       verticalAlign="bottom" 
                       height={40} 
                       iconType="circle"
-                      formatter={(value) => <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 ml-1">{value}</span>}
+                      formatter={(value) => <span className="text-[10px] sm:text-[11px] font-medium text-slate-300 ml-1 truncate" title={value}>{value}</span>}
                     />
                   </PieChart>
                 </ResponsiveContainer>
