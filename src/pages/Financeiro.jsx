@@ -6,13 +6,14 @@ import {
   TrendingUp, TrendingDown, DollarSign, Calendar, Clock, CheckCircle2, Filter,
   Home, Utensils, Car, Lightbulb, HeartPulse, GraduationCap, Laptop, 
   PartyPopper, CreditCard, MoreHorizontal, Briefcase, Landmark, Code, RefreshCw, Coins,
-  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift
+  Eye, Sparkles, ShoppingCart, Shirt, Heart, Wrench, Gift, ChevronDown, ChevronUp,
+  PiggyBank, ArrowUpFromLine, ArrowDownToLine
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// CATEGORIAS COMPACTAS E ABRANGENTES
+// CATEGORIAS ATUALIZADAS (COM SUPORTE A INVESTIMENTOS)
 const CATEGORIAS_RECEITA = [
-  'Salário', 'Freelance', 'Investimentos', 
+  'Salário', 'Freelance', 'Rendimentos/Dividendos', 'Resgate de Investimento',
   'Bolsa/Auxílio', 'Cashback', 'Vendas', 'Mesada/Doação', 'Outros'
 ];
 
@@ -20,7 +21,7 @@ const CATEGORIAS_DESPESA = [
   'Moradia', 'Mercado', 'Alimentação Fora', 'Transporte', 
   'Contas Fixas', 'Saúde', 'Educação', 'Assinaturas', 
   'Lazer', 'Cuidados Pessoais', 'Cartão de Crédito', 
-  'Impostos/Taxas', 'Pets', 'Manutenção', 'Presentes', 'Outros'
+  'Aporte de Investimento', 'Impostos/Taxas', 'Pets', 'Manutenção', 'Presentes', 'Outros'
 ];
 
 const CORES_GRAFICO = ['#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'];
@@ -51,11 +52,13 @@ const getCategoryIcon = (category) => {
     case 'Pets': return <Heart size={14} className="text-red-400" />;
     case 'Manutenção': return <Wrench size={14} className="text-slate-400" />;
     case 'Presentes': return <Gift size={14} className="text-rose-300" />;
+    case 'Aporte de Investimento': return <ArrowUpFromLine size={14} className="text-emerald-400" />;
     
     case 'Salário': return <Briefcase size={14} className="text-emerald-400" />;
     case 'Bolsa/Auxílio': return <GraduationCap size={14} className="text-blue-400" />;
     case 'Freelance': return <Code size={14} className="text-teal-400" />;
-    case 'Investimentos': return <TrendingUp size={14} className="text-green-400" />;
+    case 'Rendimentos/Dividendos': return <TrendingUp size={14} className="text-green-400" />;
+    case 'Resgate de Investimento': return <ArrowDownToLine size={14} className="text-amber-400" />;
     case 'Cashback': return <RefreshCw size={14} className="text-emerald-300" />;
     case 'Vendas': return <Tag size={14} className="text-indigo-300" />;
     case 'Mesada/Doação': return <Gift size={14} className="text-purple-300" />;
@@ -126,16 +129,16 @@ export default function Financeiro() {
   const [status, setStatus] = useState('pago');
   const [editingId, setEditingId] = useState(null);
 
-  // ESTADO DO CARRINHO DE CARTÃO DE CRÉDITO
+  // ESTADOS DO CARRINHO DE CARTÃO DE CRÉDITO
   const [cartItems, setCartItems] = useState([]);
   const [cartItemName, setCartItemName] = useState('');
   const [cartItemValue, setCartItemValue] = useState('');
-  
-  // ESTADO PARA O MODAL DA FATURA
+  const [expandedFaturaId, setExpandedFaturaId] = useState(null);
   const [faturaModal, setFaturaModal] = useState({ isOpen: false, transaction: null, items: [] });
 
-  // ESTADO DO MODO PROJEÇÃO
+  // ESTADOS GERAIS
   const [isProjected, setIsProjected] = useState(false);
+  const [chartType, setChartType] = useState('despesa'); // 'receita' ou 'despesa'
 
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -149,22 +152,18 @@ export default function Financeiro() {
     }
   }, [type, editingId]);
 
-  // MOTOR TEMPORAL AJUSTADO PARA O FUTURO
   const availableYears = useMemo(() => {
     const yearsSet = new Set();
-    
     transactions.forEach(t => {
       if (t.date) {
         const y = t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
         if (y) yearsSet.add(y);
       }
     });
-
     const baseYear = parseInt(currentYear, 10);
     for (let i = -2; i <= 5; i++) {
       yearsSet.add(String(baseYear + i));
     }
-
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [transactions, currentYear]);
 
@@ -185,6 +184,17 @@ export default function Financeiro() {
     });
   }, [transactions, filterMonth, filterYear]);
 
+  // CÁLCULO GLOBAL DE INVESTIMENTOS (Todo o histórico)
+  const totalInvestido = useMemo(() => {
+    return transactions.reduce((acc, t) => {
+      if ((t.status || 'pago') === 'pago') {
+        if (t.category === 'Aporte de Investimento') return acc + Number(t.amount);
+        if (t.category === 'Resgate de Investimento') return acc - Number(t.amount);
+      }
+      return acc;
+    }, 0);
+  }, [transactions]);
+
   const { receitasPagas, despesasPagas, aPagar, aReceber } = useMemo(() => {
     return filteredTransactions.reduce((acc, t) => {
       const tStatus = t.status || 'pago';
@@ -194,6 +204,7 @@ export default function Financeiro() {
         if (tStatus === 'pago') acc.receitasPagas += valor;
         else acc.aReceber += valor;
       } else {
+        // Se for Aporte de Investimento, conta como despesa no balanço do mês (dinheiro saiu da conta)
         if (tStatus === 'pago') acc.despesasPagas += valor;
         else acc.aPagar += valor;
       }
@@ -206,16 +217,16 @@ export default function Financeiro() {
   const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
   const displayBalanco = displayReceitas - displayDespesas;
 
-  const despesasPorCategoria = useMemo(() => {
-    const despesas = filteredTransactions.filter(t => t.type === 'despesa' && (isProjected ? true : (t.status || 'pago') === 'pago'));
-    const agrupado = despesas.reduce((acc, transacao) => {
+  const chartData = useMemo(() => {
+    const listFilter = filteredTransactions.filter(t => t.type === chartType && (isProjected ? true : (t.status || 'pago') === 'pago'));
+    const agrupado = listFilter.reduce((acc, transacao) => {
       const index = acc.findIndex(item => item.name === transacao.category);
       if (index !== -1) acc[index].value += transacao.amount;
       else acc.push({ name: transacao.category, value: transacao.amount });
       return acc;
     }, []);
     return agrupado.sort((a, b) => b.value - a.value);
-  }, [filteredTransactions, isProjected]);
+  }, [filteredTransactions, isProjected, chartType]);
 
   const handleAmountChange = (e) => setAmount(formatCurrency(e.target.value));
 
@@ -276,10 +287,21 @@ export default function Financeiro() {
     setEditingId(t.id);
     
     let limpaDesc = t.description;
+    let extractedCartItems = [];
+
+    // Magia da Re-edição: Pega os dados brutos e refaz a lista do carrinho
     if (t.category === 'Cartão de Crédito' && t.description.includes('[')) {
        limpaDesc = t.description.split(' [')[0];
+       const rawItems = t.description.match(/\[(.*?)\|([0-9.]+)\]/g) || [];
+       extractedCartItems = rawItems.map((str, idx) => {
+         const clean = str.replace('[', '').replace(']', '');
+         const [n, v] = clean.split('|');
+         return { id: Date.now() + idx, nome: n, valor: Number(v) };
+       });
     }
+    
     setDescription(limpaDesc);
+    setCartItems(extractedCartItems);
     
     const stringAmount = t.amount.toFixed(2).replace('.', '');
     setAmount(formatCurrency(stringAmount));
@@ -292,7 +314,6 @@ export default function Financeiro() {
       setDate(t.date || getTodayFormatted());
     }
     setStatus(t.status || 'pago');
-    setCartItems([]); 
     
     setTimeout(() => {
       if (formRef.current) {
@@ -336,7 +357,6 @@ export default function Financeiro() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap w-full sm:w-auto">
-          
           <button 
             onClick={() => setIsProjected(!isProjected)}
             className={`flex-1 sm:flex-none items-center justify-center flex gap-2 px-4 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-lg ${
@@ -350,9 +370,7 @@ export default function Financeiro() {
           </button>
 
           <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/10 p-1.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-xl flex-1 sm:flex-none">
-            <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block">
-              <Filter size={16} />
-            </div>
+            <div className="pl-3 sm:pl-4 text-slate-400 hidden sm:block"><Filter size={16} /></div>
             <select 
               value={filterMonth}
               onChange={(e) => setFilterMonth(e.target.value)}
@@ -377,12 +395,12 @@ export default function Financeiro() {
         </div>
       </div>
 
-      {/* 4 Cards de Resumo */}
-      <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6 sm:mb-8">
+      {/* 5 Cards de Resumo */}
+      <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-5 mb-6 sm:mb-8">
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
-              {isProjected ? 'Receitas (Projetadas)' : 'Receitas (Pagas)'}
+              {isProjected ? 'Receitas (Projet)' : 'Receitas'}
             </span>
             <div className="p-1.5 sm:p-2.5 bg-emerald-500/10 rounded-lg sm:rounded-xl shrink-0">
               <TrendingUp className="text-emerald-400 w-3 h-3 sm:w-5 sm:h-5" />
@@ -396,7 +414,7 @@ export default function Financeiro() {
         <div className="bg-gradient-to-br from-white/10 to-transparent border border-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className="text-[10px] sm:text-sm font-semibold text-slate-400 tracking-wide uppercase truncate mr-2">
-              {isProjected ? 'Despesas (Projetadas)' : 'Despesas (Pagas)'}
+              {isProjected ? 'Despesas (Projet)' : 'Despesas'}
             </span>
             <div className="p-1.5 sm:p-2.5 bg-rose-500/10 rounded-lg sm:rounded-xl shrink-0">
               <TrendingDown className="text-rose-400 w-3 h-3 sm:w-5 sm:h-5" />
@@ -424,7 +442,7 @@ export default function Financeiro() {
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
-              {isProjected ? 'Balanço Final' : 'Balanço Atual'}
+              Balanço Mês
             </span>
             <div className="p-1.5 sm:p-2.5 bg-indigo-500/20 rounded-lg sm:rounded-xl shrink-0">
               <DollarSign className="text-indigo-300 w-3 h-3 sm:w-5 sm:h-5" />
@@ -434,6 +452,22 @@ export default function Financeiro() {
             {displayBalanco >= 0 ? '+' : ''}{displayBalanco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </div>
         </div>
+
+        {/* CARD DE INVESTIMENTOS (Global) */}
+        <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
+          <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
+            <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
+              Total Investido
+            </span>
+            <div className="p-1.5 sm:p-2.5 bg-emerald-500/20 rounded-lg sm:rounded-xl shrink-0">
+              <PiggyBank className="text-emerald-300 w-3 h-3 sm:w-5 sm:h-5" />
+            </div>
+          </div>
+          <div className={`font-mono text-base sm:text-2xl font-bold relative z-10 truncate transition-all duration-300 text-emerald-400`}>
+            {totalInvestido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </div>
+        </div>
+
       </div>
 
       <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -470,7 +504,7 @@ export default function Financeiro() {
                 </div>
 
                 {/* MÓDULO INTELIGENTE DO CARRINHO DE CARTÃO */}
-                {category === 'Cartão de Crédito' && !editingId && (
+                {category === 'Cartão de Crédito' && (
                   <div className="col-span-1 sm:col-span-2 bg-black/20 p-4 rounded-xl border border-white/5 space-y-3 mt-1 shadow-inner">
                     <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                       <CreditCard size={14} className="text-indigo-400"/> Lançamentos da Fatura
@@ -592,26 +626,43 @@ export default function Financeiro() {
             </form>
           </div>
 
-          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[300px] sm:h-[360px] flex flex-col hidden md:flex transition-all">
-            <div className="flex items-center justify-between mb-2">
+          <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl h-[340px] sm:h-[400px] flex flex-col hidden md:flex transition-all">
+            
+            <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
               <div className="flex items-center gap-2">
                 <PieChartIcon className="text-slate-400 w-4 h-4 sm:w-5 sm:h-5" />
                 <h2 className="text-sm sm:text-base font-bold text-white">
-                  Mapa de Despesas {isProjected && <span className="text-cyan-400 text-xs">(Projetado)</span>}
+                  Distribuição {isProjected && <span className="text-cyan-400 text-xs">(Projetada)</span>}
                 </h2>
+              </div>
+              
+              {/* TOGGLE: DESPESAS VS RECEITAS */}
+              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
+                <button 
+                  onClick={() => setChartType('despesa')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${chartType === 'despesa' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Despesas
+                </button>
+                <button 
+                  onClick={() => setChartType('receita')}
+                  className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${chartType === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Receitas
+                </button>
               </div>
             </div>
             
             <div className="flex-1 w-full relative">
-              {despesasPorCategoria.length === 0 ? (
+              {chartData.length === 0 ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs sm:text-sm text-center px-4">
-                  Nenhuma despesa para este período.
+                  Sem {chartType === 'receita' ? 'receitas' : 'despesas'} neste período.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={despesasPorCategoria}
+                      data={chartData}
                       cx="50%"
                       cy="45%"
                       innerRadius={60}
@@ -621,7 +672,7 @@ export default function Financeiro() {
                       stroke="none"
                       cornerRadius={6}
                     >
-                      {despesasPorCategoria.map((entry, index) => (
+                      {chartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={CORES_GRAFICO[index % CORES_GRAFICO.length]} />
                       ))}
                     </Pie>
@@ -659,12 +710,10 @@ export default function Financeiro() {
                 const isPendente = (t.status || 'pago') === 'pendente';
                 const isReceita = t.type === 'receita';
                 
-                // Tratamento especial se for fatura com itens
                 const isFaturaCartao = t.category === 'Cartão de Crédito' && t.description.includes('[');
                 const titleParts = isFaturaCartao ? t.description.split(' [') : [t.description];
                 const mainTitle = titleParts[0];
                 
-                // Parseia os itens de "[Nome|10] [Uber|25.5]"
                 let cartaoItens = [];
                 if (isFaturaCartao && titleParts.length > 1) {
                    const rawItems = t.description.match(/\[(.*?)\|([0-9.]+)\]/g) || [];
@@ -711,7 +760,6 @@ export default function Financeiro() {
                       
                       <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         
-                        {/* Botão de Ver Fatura (Modal) */}
                         {isFaturaCartao && (
                           <button 
                             onClick={() => setFaturaModal({ isOpen: true, transaction: t, items: cartaoItens })}
