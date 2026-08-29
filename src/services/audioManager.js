@@ -6,17 +6,16 @@ export class GerenciadorDeAudio {
     this.stream = null;
     this.source = null;
     this.workletNode = null;
+    this.analyser = null;
     
-    // Fila de reprodução para juntar os pedaços de voz perfeitamente
     this.nextPlayTime = 0; 
+    this.isTalking = false;
+    this.silenceTimer = null;
   }
 
-  async inicializar(onPcmData) {
-    // 1. Inicia o motor de áudio na frequência exata exigida pelo Google (16kHz)
+  async inicializar(onPcmData, onSilenceDetected) {
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
 
-    // 2. Criamos o Processador de Áudio na memória (Evita erros de arquivo no Vite)
-    // Ele converte as ondas Float32 nativas do navegador para Int16 PCM (formato do Gemini)
     const codigoDoProcessador = `
       class PcmProcessor extends AudioWorkletProcessor {
         process(inputs, outputs, parameters) {
@@ -28,10 +27,9 @@ export class GerenciadorDeAudio {
               let s = Math.max(-1, Math.min(1, canal[i]));
               pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
-            // Envia o bloco de áudio para a thread principal
             this.port.postMessage(pcm16.buffer);
           }
-          return true; // Mantém o processador vivo
+          return true; 
         }
       }
       registerProcessor('pcm-processor', PcmProcessor);
@@ -39,66 +37,88 @@ export class GerenciadorDeAudio {
     
     const blob = new Blob([codigoDoProcessador], { type: 'application/javascript' });
     const workletUrl = URL.createObjectURL(blob);
-    
     await this.audioContext.audioWorklet.addModule(workletUrl);
     
-    // 3. Captura o microfone com cancelamento de ruído ativado
     this.stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { 
-        channelCount: 1, 
-        echoCancellation: true, 
-        autoGainControl: true, 
-        noiseSuppression: true 
-      } 
+      audio: { channelCount: 1, echoCancellation: true, autoGainControl: true, noiseSuppression: true } 
     });
     
     this.source = this.audioContext.createMediaStreamSource(this.stream);
     this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
     
-    // 4. Recebe os pacotes do microfone e envia para o WebSocket
+    // =====================================================================
+    // O DETECTOR DE SILÊNCIO (Recalibrado para ignorar chiados)
+    // =====================================================================
+    this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.analyser.minDecibels = -50; 
+    this.analyser.smoothingTimeConstant = 0.2; // Reage mais rápido quando o senhor para de falar
+    this.source.connect(this.analyser);
+
+    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    
+    const monitorarVolume = () => {
+      if (!this.analyser) return;
+      this.analyser.getByteFrequencyData(dataArray);
+      
+      let soma = 0;
+      for (let i = 0; i < dataArray.length; i++) soma += dataArray[i];
+      let volumeMedio = soma / dataArray.length;
+
+      // Aumentamos o limite para 15 (antes era 5). Ele vai ignorar estática e ventiladores pequenos.
+      const LIMITE_DE_RUIDO = 15;
+
+      if (volumeMedio > LIMITE_DE_RUIDO) { 
+        // O SENHOR ESTÁ FALANDO (O volume superou o ruído de fundo)
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
+        }
+        this.isTalking = true;
+      } else { 
+        // SILÊNCIO DETECTADO (O volume caiu para o nível do ruído de fundo)
+        if (this.isTalking && !this.silenceTimer) {
+          this.silenceTimer = setTimeout(() => {
+            this.isTalking = false;
+            console.log("[Bastian Core] Silêncio detectado. Forçando resposta da IA...");
+            if (onSilenceDetected) onSilenceDetected(); // Dispara o "Câmbio" invisível
+          }, 1500); // Exatos 1.5s após o senhor parar de falar
+        }
+      }
+      requestAnimationFrame(monitorarVolume);
+    };
+    monitorarVolume();
+    // =====================================================================
+
     this.workletNode.port.onmessage = (event) => {
       const pcmBuffer = event.data;
       const base64Audio = this.arrayBufferToBase64(pcmBuffer);
       onPcmData(base64Audio);
     };
 
-    // Conecta o circuito (Sem conectar na saída de som para o senhor não ouvir a própria voz)
     this.source.connect(this.workletNode);
     this.workletNode.connect(this.audioContext.destination); 
   }
 
-  // Conversor ultrarrápido de Buffer para Base64
   arrayBufferToBase64(buffer) {
     let binary = '';
     const bytes = new Uint8Array(buffer);
     const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
+    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
     return window.btoa(binary);
   }
 
-  // =========================================================================
-  // GERAÇÃO DE VOZ (Toca os pacotes que chegam do Gemini em Tempo Real)
-  // =========================================================================
   tocarAudio(base64Audio) {
     if (!this.audioContext) return;
     
     const stringBinaria = window.atob(base64Audio);
-    const len = stringBinaria.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = stringBinaria.charCodeAt(i);
-    }
+    const bytes = new Uint8Array(stringBinaria.length);
+    for (let i = 0; i < stringBinaria.length; i++) bytes[i] = stringBinaria.charCodeAt(i);
     
-    // O Gemini responde em PCM16, precisamos converter de volta para Float32 pro Alto-falante
     const int16Array = new Int16Array(bytes.buffer);
     const float32Array = new Float32Array(int16Array.length);
-    for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-    }
+    for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768.0;
 
-    // O Gemini fala na frequência de 24kHz (qualidade de estúdio)
     const audioBuffer = this.audioContext.createBuffer(1, float32Array.length, 24000);
     audioBuffer.getChannelData(0).set(float32Array);
 
@@ -106,7 +126,6 @@ export class GerenciadorDeAudio {
     reprodutor.buffer = audioBuffer;
     reprodutor.connect(this.audioContext.destination);
     
-    // FILA DE REPRODUÇÃO: Toca o áudio colado no anterior, sem engasgos
     const tempoAtual = this.audioContext.currentTime;
     if (tempoAtual < this.nextPlayTime) {
        reprodutor.start(this.nextPlayTime);
@@ -118,15 +137,13 @@ export class GerenciadorDeAudio {
   }
 
   parar() {
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-    }
-    if (this.workletNode) {
-      this.workletNode.disconnect();
-    }
-    if (this.audioContext) {
-      this.audioContext.close();
-    }
+    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
+    if (this.workletNode) this.workletNode.disconnect();
+    if (this.analyser) this.analyser.disconnect();
+    if (this.audioContext) this.audioContext.close();
+    
+    this.analyser = null;
     this.nextPlayTime = 0;
+    if (this.silenceTimer) clearTimeout(this.silenceTimer);
   }
 }

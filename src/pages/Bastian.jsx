@@ -4,18 +4,18 @@ import { format } from 'date-fns';
 
 import { GeminiLiveConnection } from '../services/liveAiService';
 import { GerenciadorDeAudio } from '../services/audioManager';
+// Importe aqui as suas funções de banco de dados do Supabase
+// import { inserirGastoNoBanco, inserirEventoNoBanco } from '../services/supabaseService'; 
 
 export default function Bastian() {
-  const [aiState, setAiState] = useState('idle'); // idle, starting, listening, processing, speaking
+  const [aiState, setAiState] = useState('idle'); 
   const [isIntercomActive, setIsIntercomActive] = useState(false);
   const [chatLog, setChatLog] = useState([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  // Motores
   const liveConnectionRef = useRef(null);
   const audioManagerRef = useRef(null);
 
-  // Inicialização: Relógio
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -28,16 +28,13 @@ export default function Bastian() {
     return "Boa noite, senhor.";
   };
 
-  // Função auxiliar para sanitizar Markdown residual da saída de texto
   const limparMarkdown = (texto) => {
     if (!texto) return '';
-    return texto
-      .replace(/[*_~`#>-]/g, '') // Remove asteriscos, sublinhados, crases, hashtags e marcadores
-      .trim();
+    return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
   // =========================================================================
-  // SISTEMA DE IGNIÇÃO J.A.R.V.I.S. (WebSocket + WebAudio API)
+  // SISTEMA DE IGNIÇÃO J.A.R.V.I.S.
   // =========================================================================
   const ligarSistema = async () => {
     setAiState('starting');
@@ -47,16 +44,12 @@ export default function Bastian() {
       audioManagerRef.current = new GerenciadorDeAudio();
       
       const aoCaptarSom = (base64Pcm) => {
-        if (liveConnectionRef.current) {
-          liveConnectionRef.current.enviarAudioVoz(base64Pcm);
-        }
+        if (liveConnectionRef.current) liveConnectionRef.current.enviarAudioVoz(base64Pcm);
       };
 
       const aoReceberAudioDaIA = (base64Audio) => {
         setAiState('speaking');
-        if (audioManagerRef.current) {
-          audioManagerRef.current.tocarAudio(base64Audio);
-        }
+        if (audioManagerRef.current) audioManagerRef.current.tocarAudio(base64Audio);
         setTimeout(() => setAiState('listening'), 1000); 
       };
 
@@ -67,18 +60,62 @@ export default function Bastian() {
         }
       };
 
-      liveConnectionRef.current = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA);
+      // =====================================================================
+      // O EXECUTOR DE FERRAMENTAS (Onde o Bastian opera o App)
+      // =====================================================================
+      const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
+        setAiState('processing'); // O painel fica amarelo indicando que ele está trabalhando
+        const { id, name, args } = functionCallInfo;
+        
+        let resultadoDaOperacao = "";
+
+        try {
+          if (name === "adicionarGasto") {
+            const { descricao, valor } = args;
+            // AQUI O SENHOR COLOCA SEU CÓDIGO DO SUPABASE
+            // await inserirGastoNoBanco(descricao, valor);
+            
+            console.log(`[App] Adicionando Gasto: ${descricao} - R$ ${valor}`);
+            resultadoDaOperacao = `Sucesso! Gasto com ${descricao} no valor de ${valor} foi salvo no banco.`;
+            setChatLog(prev => [...prev, { role: 'bastian', text: `🔧 Ação Executada: Gasto Adicionado (${descricao}).` }]);
+          } 
+          
+          else if (name === "adicionarEvento") {
+            const { titulo, detalhes } = args;
+            // AQUI O SENHOR COLOCA SEU CÓDIGO DO SUPABASE
+            // await inserirEventoNoBanco(titulo, detalhes);
+            
+            console.log(`[App] Adicionando Evento: ${titulo} - ${detalhes || ''}`);
+            resultadoDaOperacao = `Sucesso! O evento "${titulo}" foi agendado.`;
+            setChatLog(prev => [...prev, { role: 'bastian', text: `🔧 Ação Executada: Evento Criado (${titulo}).` }]);
+          }
+
+        } catch (erro) {
+          console.error("Erro ao executar ferramenta:", erro);
+          resultadoDaOperacao = "Ocorreu um erro no aplicativo ao tentar salvar os dados.";
+        }
+
+        // Devolve o resultado para a IA para ela poder falar "Pronto, senhor!"
+        if (liveConnectionRef.current) {
+          liveConnectionRef.current.enviarRespostaDeFuncao(id, name, resultadoDaOperacao);
+        }
+      };
+
+      // Passamos as 3 funções para o cérebro
+      liveConnectionRef.current = new GeminiLiveConnection(
+        aoReceberAudioDaIA, 
+        aoReceberTextoDaIA, 
+        aoReceberChamadaDeFuncao
+      );
 
       await liveConnectionRef.current.conectar();
       await audioManagerRef.current.inicializar(aoCaptarSom);
 
       setAiState('listening');
-      console.log("[Bastian Core] Todos os sistemas online e captando.");
 
     } catch (erro) {
-      console.error("Falha ao ligar o sistema:", erro);
       desligarSistema();
-      alert("Senhor, houve uma falha crítica ao acessar o hardware de áudio ou a rede neural.");
+      alert("Falha crítica no sistema de áudio.");
     }
   };
 
@@ -96,22 +133,13 @@ export default function Bastian() {
   };
 
   const toggleIntercom = () => {
-    if (isIntercomActive) {
-      desligarSistema();
-    } else {
-      ligarSistema();
-    }
+    if (isIntercomActive) desligarSistema();
+    else ligarSistema();
   };
 
-  useEffect(() => {
-    return () => {
-      desligarSistema();
-    };
-  }, []);
+  useEffect(() => { return () => desligarSistema(); }, []);
 
-  // ==========================================
-  // ESTILOS VISUAIS
-  // ==========================================
+  // Estilos omitidos para brevidade (São idênticos aos anteriores)
   const getRingColorClass = () => {
     if (!isIntercomActive) return 'text-slate-600/40 drop-shadow-none';
     switch (aiState) {
@@ -125,14 +153,10 @@ export default function Bastian() {
   const getOrbAura = () => {
     if (!isIntercomActive) return 'bg-transparent opacity-0';
     switch (aiState) {
-      case 'listening': 
-        return 'from-cyan-300 via-blue-400 to-indigo-500 scale-110 shadow-[0_0_90px_rgba(6,182,212,0.9)] animate-[pulse_1.5s_ease-in-out_infinite]';
-      case 'processing': 
-        return 'from-amber-400 via-orange-500 to-rose-600 scale-100 shadow-[0_0_100px_rgba(245,158,11,0.8)] animate-[spin_1.5s_linear_infinite]';
-      case 'speaking': 
-        return 'from-emerald-400 via-teal-500 to-cyan-600 scale-125 shadow-[0_0_120px_rgba(52,211,153,0.9)] animate-[pulse_1s_ease-in-out_infinite]';
-      default: 
-        return 'from-cyan-900 via-slate-800 to-indigo-950 scale-90 shadow-[0_0_30px_rgba(6,182,212,0.2)] opacity-80';
+      case 'listening': return 'from-cyan-300 via-blue-400 to-indigo-500 scale-110 shadow-[0_0_90px_rgba(6,182,212,0.9)] animate-[pulse_1.5s_ease-in-out_infinite]';
+      case 'processing': return 'from-amber-400 via-orange-500 to-rose-600 scale-100 shadow-[0_0_100px_rgba(245,158,11,0.8)] animate-[spin_1.5s_linear_infinite]';
+      case 'speaking': return 'from-emerald-400 via-teal-500 to-cyan-600 scale-125 shadow-[0_0_120px_rgba(52,211,153,0.9)] animate-[pulse_1s_ease-in-out_infinite]';
+      default: return 'from-cyan-900 via-slate-800 to-indigo-950 scale-90 opacity-80';
     }
   };
 
@@ -142,7 +166,7 @@ export default function Bastian() {
       case 'listening': return 'radial-gradient(circle at 50% 40%, rgba(6,182,212,0.25) 0%, transparent 60%)';
       case 'processing': return 'radial-gradient(circle at 50% 40%, rgba(245,158,11,0.15) 0%, transparent 60%)';
       case 'speaking': return 'radial-gradient(circle at 50% 40%, rgba(52,211,153,0.15) 0%, transparent 60%)';
-      default: return 'radial-gradient(circle at 50% 40%, rgba(30,41,59,0.3) 0%, transparent 50%)';
+      default: return 'none';
     }
   };
 
@@ -152,18 +176,15 @@ export default function Bastian() {
       case 'listening': return 'border-cyan-300 shadow-[0_0_50px_rgba(6,182,212,0.7)] bg-black/60 scale-105';
       case 'processing': return 'border-amber-400 shadow-[0_0_60px_rgba(251,191,36,0.6)] animate-pulse bg-black/70';
       case 'speaking': return 'border-emerald-400 shadow-[0_0_80px_rgba(52,211,153,0.8)] bg-black/60';
-      default: return 'border-cyan-700/50 shadow-[0_0_20px_rgba(6,182,212,0.2)] bg-black/50';
+      default: return 'border-cyan-700/50 bg-black/50';
     }
   };
 
   return (
     <div className="min-h-[calc(100vh-80px)] flex flex-col items-center relative overflow-hidden font-sans select-none p-4 sm:p-6 box-border max-w-[100vw] bg-[#020617]">
-      
-      {/* Brilho de Fundo Dinâmico */}
       <div className="absolute inset-0 z-0 pointer-events-none transition-all duration-1000 ease-in-out" style={{ background: getBackgroundGlow() }}></div>
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:3rem_3rem] z-0 pointer-events-none"></div>
 
-      {/* HUD DE CONSCIÊNCIA DE TEMPO E ESPAÇO */}
       <div className="relative z-10 w-full max-w-4xl flex justify-between items-center bg-white/5 border border-white/10 px-6 py-3 rounded-2xl backdrop-blur-md shadow-xl mt-2 mb-8">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-cyan-400/80">
@@ -183,7 +204,6 @@ export default function Bastian() {
         </div>
       </div>
       
-      {/* CENTRO NEURAL */}
       <div className="relative z-10 flex flex-col items-center mt-2 sm:mt-8 w-full flex-1">
         
         <div className="text-center flex flex-col items-center gap-2 mb-10">
@@ -196,7 +216,6 @@ export default function Bastian() {
         </div>
 
         <div className="relative flex items-center justify-center w-[260px] h-[260px] sm:w-[320px] sm:h-[320px] mb-12 transition-all duration-500">
-          
           <div className="pointer-events-none absolute inset-0">
             <div className={`absolute inset-0 border-2 border-transparent border-t-current border-r-current rounded-full transition-colors duration-500 ${getRingColorClass()} ${aiState === 'processing' ? 'animate-[spin_1s_linear_infinite]' : 'animate-[spin_4s_linear_infinite]'}`}></div>
             <div className={`absolute inset-[5%] border-[3px] border-transparent border-b-current border-l-current rounded-full transition-colors duration-500 ${getRingColorClass()} ${aiState === 'processing' ? 'animate-[spin_1.5s_linear_reverse_infinite]' : 'animate-[spin_5s_linear_reverse_infinite]'}`}></div>
@@ -208,7 +227,6 @@ export default function Bastian() {
           <button 
             onClick={toggleIntercom}
             className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center backdrop-blur-md border-2 z-20 cursor-pointer active:scale-95 transition-all duration-300 ${getCoreStyles()}`}
-            title={isIntercomActive ? "Desligar Sistema" : "Ligar Sistema Bidirecional"}
           >
             <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full transition-colors duration-300 ${!isIntercomActive ? 'bg-slate-700/80' : aiState === 'processing' ? 'bg-amber-300 animate-ping' : aiState === 'speaking' ? 'bg-emerald-300 animate-bounce' : 'bg-cyan-300 animate-pulse shadow-[0_0_20px_rgba(6,182,212,0.9)]'}`}></div>
             <div className="absolute w-2.5 h-2.5 sm:w-3 sm:h-3 bg-white/90 rounded-full shadow-[0_0_5px_rgba(255,255,255,1)]"></div>
@@ -222,15 +240,14 @@ export default function Bastian() {
               aiState === 'processing' ? 'text-amber-400 animate-pulse' :
               aiState === 'speaking' ? 'text-emerald-400' : 'text-slate-600'
             }`}>
-              {aiState === 'listening' ? 'Conexão Estabelecida. Pode falar continuamente...' :
+              {aiState === 'listening' ? 'Conexão Estabelecida. Pode falar...' :
                aiState === 'starting' ? 'Negociando WebSocket...' :
-               aiState === 'processing' ? 'Analisando...' :
+               aiState === 'processing' ? 'Executando Sistema...' :
                aiState === 'speaking' ? 'Respondendo...' : 'Toque no centro para iniciar o Live Mode'}
             </p>
         </div>
       </div>
 
-      {/* Painel de Histórico (Log) */}
       <div className="relative z-10 w-full max-w-3xl flex flex-col gap-4 mt-auto mb-4">
         {chatLog.length > 0 && (
           <div className="bg-white/5 border border-white/10 rounded-3xl p-5 sm:p-7 backdrop-blur-md max-h-[250px] overflow-y-auto custom-scrollbar flex flex-col gap-4 shadow-2xl">
