@@ -1,9 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useAuthStore } from './store/useAuthStore';
-import { useAgendaStore } from './store/useAgendaStore'; 
 import { supabase } from './lib/supabase';
 import { Toaster } from 'react-hot-toast';
+
+// IMPORTS DOS STORES ZUSTAND (Importando todos agora)
+import { useAuthStore } from './store/useAuthStore';
+import { useAgendaStore } from './store/useAgendaStore'; 
+import { useFinanceStore } from './store/useFinanceStore';
+import { useInboxStore } from './store/useInboxStore';
+import { useKanbanStore } from './store/useKanbanStore';
+import { useFitnessStore } from './store/useFitnessStore';
+
+// IMPORT DO SERVIÇO DE PUSH NOTIFICATION (Adicionado)
+import { registrarPushNoCelular } from './services/pushService';
 
 // imports das páginas
 import Login from './pages/Login';
@@ -54,6 +63,12 @@ function App() {
   const { user, initialize, isLoading } = useAuthStore();
   const { agendaItems, fetchAgendaItems } = useAgendaStore(); 
   
+  // Pegamos as funções de carregamento dos outros stores
+  const fetchTransactions = useFinanceStore(state => state.fetchTransactions);
+  const fetchInboxTasks = useInboxStore(state => state.fetchInboxTasks);
+  const fetchKanbanTasks = useKanbanStore(state => state.fetchKanbanTasks);
+  const fetchHealthLogs = useFitnessStore(state => state.fetchHealthLogs);
+
   const [showLoading, setShowLoading] = useState(true);
 
   // MOTOR 1: INICIALIZAÇÃO DE AUTENTICAÇÃO (Roda só 1 vez)
@@ -61,12 +76,22 @@ function App() {
     initialize();
   }, [initialize]);
 
-  // MOTOR 2: BUSCA DA AGENDA (Roda só quando o usuário loga)
+  // =====================================================================
+  // MOTOR 2: CARREGAMENTO GLOBAL DE DADOS (Pré-Load) E REGISTRO PUSH
+  // O Segredo do Bastian: Agora ele sabe de tudo antes mesmo do senhor pedir.
+  // =====================================================================
   useEffect(() => {
-    if (user && fetchAgendaItems) {
-      fetchAgendaItems();
+    if (user) {
+      if (fetchAgendaItems) fetchAgendaItems();
+      if (fetchTransactions) fetchTransactions();
+      if (fetchInboxTasks) fetchInboxTasks();
+      if (fetchKanbanTasks) fetchKanbanTasks();
+      if (fetchHealthLogs) fetchHealthLogs();
+      
+      // A MÁGICA ACONTECE AQUI: Registra o aparelho no banco de dados silenciosamente
+      registrarPushNoCelular(); 
     }
-  }, [user, fetchAgendaItems]);
+  }, [user, fetchAgendaItems, fetchTransactions, fetchInboxTasks, fetchKanbanTasks, fetchHealthLogs]);
 
   // =====================================================================
   // MOTOR 3: NOTIFICAÇÕES E VIGIA DA AGENDA (Seguro contra Loops)
