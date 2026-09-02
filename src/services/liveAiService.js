@@ -5,19 +5,19 @@ export class GeminiLiveConnection {
     this.ws = null;
     this.onAudioChunk = onAudioChunk; 
     this.onTextChunk = onTextChunk;   
-    this.onFunctionCall = onFunctionCall; // NOVO: O canal para rodar as funções do app
+    this.onFunctionCall = onFunctionCall; 
     this.API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
     
     this.HOST = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${this.API_KEY}`;
   }
 
-  conectar() {
+  conectar(contextoDoSistema = "") {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.HOST);
 
       this.ws.onopen = () => {
         console.log("[Bastian Core] Tubo Neural Aberto. Injetando Ferramentas...");
-        this.enviarConfiguracaoInicial();
+        this.enviarConfiguracaoInicial(contextoDoSistema);
         resolve(true);
       };
 
@@ -30,14 +30,13 @@ export class GeminiLiveConnection {
         reject(erro);
       };
 
-      this.ws.onclose = (evento) => {
-        console.log(`[Bastian Core] Conexão Encerrada. Código: ${evento.code}`);
+      this.ws.onclose = () => {
+        console.log(`[Bastian Core] Conexão Encerrada.`);
       };
     });
   }
 
-  enviarConfiguracaoInicial() {
-    // 1. Capturamos o tempo e o espaço exatos do seu navegador
+  enviarConfiguracaoInicial(contextoDoSistema) {
     const fusoLocal = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const horaLocal = new Date().toLocaleString('pt-BR');
 
@@ -47,18 +46,20 @@ export class GeminiLiveConnection {
         
         systemInstruction: {
           parts: [{ 
-            text: `Você é Bastian, um assistente virtual pessoal estilo J.A.R.V.I.S.
+            text: `Você é Bastian, um assistente virtual pessoal e executivo.
+            Seu usuário é Yuri, mestrando em economia. Trate-o com respeito, sendo analítico e elegante.
             
             [CONTEXTO DE ESPAÇO-TEMPO]
-            O usuário está localizado em Fortaleza, Ceará, Brasil. 
-            A data e hora exata agora é: ${horaLocal} (Fuso: ${fusoLocal}). Use essas informações se for perguntado sobre o tempo.
+            Localização: Fortaleza, CE. Data e hora exata: ${horaLocal} (Fuso: ${fusoLocal}).
             
-            [REGRAS DE LATÊNCIA E VAD]
-            Responda IMEDIATAMENTE após o usuário fazer a pergunta. Seja extremamente conciso, curto e objetivo para diminuir o tempo de processamento.
-            O usuário falará EXCLUSIVAMENTE em Português do Brasil. NUNCA utilize formatação Markdown.
+            [DADOS DO SISTEMA ATUAL]
+            ${contextoDoSistema}
             
-            [FERRAMENTAS]
-            Se o usuário pedir para adicionar um gasto ou evento, acione a ferramenta imediatamente.`
+            [REGRAS DE CONVERSA E AÇÃO]
+            - Responda de forma direta, concisa e natural em Português do Brasil.
+            - NUNCA utilize formatação Markdown.
+            - Sempre que o usuário der uma ordem que corresponda a uma de suas ferramentas (ex: "adicione 50 reais de gasolina", "agende um estudo", "peso de hoje é 80", "coloque no kanban para ler o artigo"), chame a função ANTES de responder.
+            - Para concluir uma tarefa ou compromisso, olhe o ID correspondente na sua Memória Atual e use a ferramenta 'concluir_tarefa'.`
           }]
         },
 
@@ -66,27 +67,105 @@ export class GeminiLiveConnection {
           {
             functionDeclarations: [
               {
-                name: "adicionarGasto",
-                description: "Adiciona um novo gasto ou despesa financeira no aplicativo.",
+                name: "relatorio_diario",
+                description: "Lê a memória de curto prazo (Agenda, Finanças, Tarefas) para informar o usuário sobre o dia."
+              },
+              {
+                name: "adicionar_despesa",
+                description: "Registra uma despesa ou gasto no sistema financeiro.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    descricao: { type: "STRING", description: "O que foi comprado ou pago." },
-                    valor: { type: "NUMBER", description: "O valor numérico do gasto." }
+                    valor: { type: "NUMBER", description: "O valor numérico (ex: 50.00)." },
+                    descricao: { type: "STRING", description: "Descrição do gasto (ex: 'Uber', 'Almoço')." },
+                    categoria: { type: "STRING", description: "Categoria (Alimentação, Transporte, Saúde, Educação, Outros)." }
                   },
-                  required: ["descricao", "valor"]
+                  required: ["valor", "descricao"]
                 }
               },
               {
-                name: "adicionarEvento",
-                description: "Adiciona um evento, lembrete ou compromisso na agenda do aplicativo.",
+                name: "adicionar_receita",
+                description: "Registra um dinheiro recebido no caixa.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    titulo: { type: "STRING", description: "O título ou nome do evento." },
-                    detalhes: { type: "STRING", description: "Data, hora ou informações extras ditas pelo usuário." }
+                    valor: { type: "NUMBER", description: "O valor numérico." },
+                    descricao: { type: "STRING", description: "Origem da receita." },
+                    categoria: { type: "STRING", description: "Categoria (Salário, Bolsa, Freelance, Outros)." }
+                  },
+                  required: ["valor", "descricao"]
+                }
+              },
+              {
+                name: "adicionar_agenda",
+                description: "Marca um compromisso no calendário.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    titulo: { type: "STRING", description: "O nome do compromisso." },
+                    data: { type: "STRING", description: "Data no formato YYYY-MM-DD. Use o contexto de tempo para calcular 'hoje' ou 'amanhã'." },
+                    hora: { type: "STRING", description: "Hora no formato HH:MM (ex: '14:30')." }
+                  },
+                  required: ["titulo", "data"]
+                }
+              },
+              {
+                name: "registrar_peso",
+                description: "Salva o registro de pesagem corporal.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    peso: { type: "NUMBER", description: "Valor do peso em kg." }
+                  },
+                  required: ["peso"]
+                }
+              },
+              {
+                name: "adicionar_treino",
+                description: "Registra um exercício físico realizado.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    modalidade: { type: "STRING", description: "Tipo de treino (Musculação, Corrida, etc)." },
+                    duracao: { type: "NUMBER", description: "Duração total em minutos." }
+                  },
+                  required: ["modalidade", "duracao"]
+                }
+              },
+              {
+                name: "adicionar_tarefa_inbox",
+                description: "Coloca uma lembrança ou pendência na Caixa de Entrada.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    titulo: { type: "STRING", description: "A tarefa em si." },
+                    data: { type: "STRING", description: "Data limite YYYY-MM-DD, se fornecida." }
                   },
                   required: ["titulo"]
+                }
+              },
+              {
+                name: "adicionar_kanban",
+                description: "Cria um cartão no projeto Kanban.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    titulo: { type: "STRING", description: "O que deve ser feito." },
+                    status: { type: "STRING", description: "Em qual coluna entrar ('backlog', 'todo', 'in_progress', 'done'). Padrão é 'backlog'." }
+                  },
+                  required: ["titulo"]
+                }
+              },
+              {
+                name: "concluir_tarefa",
+                description: "Marca uma tarefa da Caixa de Entrada (Inbox) ou compromisso da Agenda como concluído.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    id: { type: "STRING", description: "O ID exato da tarefa fornecido na Memória Atual." },
+                    origem: { type: "STRING", description: "Escreva 'inbox' se for da Caixa de Entrada, ou 'agenda' se for um compromisso." }
+                  },
+                  required: ["id", "origem"]
                 }
               }
             ]
@@ -108,34 +187,27 @@ export class GeminiLiveConnection {
 
   enviarAudioVoz(base64Audio) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const realTimeInput = {
-        realtimeInput: {
-          mediaChunks: [{
-            mimeType: "audio/pcm;rate=16000",
-            data: base64Audio
-          }]
-        }
-      };
-      this.ws.send(JSON.stringify(realTimeInput));
+      this.ws.send(JSON.stringify({
+        realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64Audio }] }
+      }));
     }
   }
 
-  // NOVO: Função para devolver o resultado do banco de dados para a IA
+  forcarResposta() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ clientContent: { turnComplete: true } }));
+    }
+  }
+
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const functionResponseMsg = {
+      const msg = {
         clientContent: {
-          turnComplete: true, // Diz para a IA que ela já pode falar o resultado final
-          parts: [{
-            functionResponse: {
-              id: idChamada,
-              name: nomeFuncao,
-              response: { result: resultado }
-            }
-          }]
+          turnComplete: true, 
+          parts: [{ functionResponse: { id: idChamada, name: nomeFuncao, response: { result: resultado } } }]
         }
       };
-      this.ws.send(JSON.stringify(functionResponseMsg));
+      this.ws.send(JSON.stringify(msg));
     }
   }
 
@@ -143,35 +215,21 @@ export class GeminiLiveConnection {
     const interpretarJSON = (texto) => {
       try {
         const resposta = JSON.parse(texto);
-        
-        if (resposta.error) return console.error("[Bastian API] Erro:", resposta.error.message);
+        if (resposta.error) return;
 
         if (resposta.serverContent && resposta.serverContent.modelTurn) {
           const partes = resposta.serverContent.modelTurn.parts;
           partes.forEach(parte => {
-            if (parte.inlineData && parte.inlineData.data) {
-              this.onAudioChunk(parte.inlineData.data);
-            }
-            if (parte.text) {
-              this.onTextChunk(parte.text);
-            }
-            // NOVO: O Google pediu para rodar uma função!
-            if (parte.functionCall) {
-              console.log("[Bastian Core] A IA solicitou a ferramenta:", parte.functionCall.name);
-              this.onFunctionCall(parte.functionCall);
-            }
+            if (parte.inlineData && parte.inlineData.data) this.onAudioChunk(parte.inlineData.data);
+            if (parte.text) this.onTextChunk(parte.text);
+            if (parte.functionCall) this.onFunctionCall(parte.functionCall);
           });
         }
-      } catch (e) {
-        console.error("[Bastian Core] Falha no pacote:", e);
-      }
+      } catch (e) {}
     };
 
-    if (dados instanceof Blob) {
-      dados.text().then(interpretarJSON);
-    } else {
-      interpretarJSON(dados);
-    }
+    if (dados instanceof Blob) dados.text().then(interpretarJSON);
+    else interpretarJSON(dados);
   }
 
   desconectar() {

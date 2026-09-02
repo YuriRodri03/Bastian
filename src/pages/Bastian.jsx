@@ -4,8 +4,13 @@ import { format } from 'date-fns';
 
 import { GeminiLiveConnection } from '../services/liveAiService';
 import { GerenciadorDeAudio } from '../services/audioManager';
-// Importe aqui as suas funções de banco de dados do Supabase
-// import { inserirGastoNoBanco, inserirEventoNoBanco } from '../services/supabaseService'; 
+
+// IMPORTAÇÃO DOS SEUS STORES ZUSTAND
+import { useFinanceStore } from '../store/useFinanceStore';
+import { useAgendaStore } from '../store/useAgendaStore'; 
+import { useInboxStore } from '../store/useInboxStore';
+import { useKanbanStore } from '../store/useKanbanStore';
+import { useFitnessStore } from '../store/useFitnessStore';
 
 export default function Bastian() {
   const [aiState, setAiState] = useState('idle'); 
@@ -15,6 +20,7 @@ export default function Bastian() {
   
   const liveConnectionRef = useRef(null);
   const audioManagerRef = useRef(null);
+  const speakingTimeoutRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -33,9 +39,27 @@ export default function Bastian() {
     return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
-  // =========================================================================
-  // SISTEMA DE IGNIÇÃO J.A.R.V.I.S.
-  // =========================================================================
+  const gerarContextoDinâmico = () => {
+    const hoje = new Date().toISOString().split('T')[0];
+    const saldo = useFinanceStore.getState().balance;
+    
+    // Pegamos apenas o que NÃO está concluído e passamos o ID + Título para a IA
+    const compromissos = useAgendaStore.getState().agendaItems
+      .filter(e => e.date === hoje && !e.is_completed)
+      .map(e => ({ id: e.id, titulo: e.title }));
+      
+    const pendencias = useInboxStore.getState().inboxTasks
+      .filter(t => !t.completed)
+      .map(t => ({ id: t.id, titulo: t.title }));
+    
+    return `
+      Memória Atual:
+      - Saldo Atual: R$ ${saldo.toFixed(2)}
+      - Eventos Pendentes (Agenda): ${JSON.stringify(compromissos)}
+      - Tarefas Pendentes (Inbox): ${JSON.stringify(pendencias)}
+    `;
+  };
+
   const ligarSistema = async () => {
     setAiState('starting');
     setIsIntercomActive(true);
@@ -47,75 +71,129 @@ export default function Bastian() {
         if (liveConnectionRef.current) liveConnectionRef.current.enviarAudioVoz(base64Pcm);
       };
 
+      const aoDetectarSilencio = () => {
+        if (liveConnectionRef.current && aiState !== 'speaking') {
+          liveConnectionRef.current.forcarResposta();
+          setAiState('processing'); 
+        }
+      };
+
       const aoReceberAudioDaIA = (base64Audio) => {
-        setAiState('speaking');
+        setAiState('speaking'); 
         if (audioManagerRef.current) audioManagerRef.current.tocarAudio(base64Audio);
-        setTimeout(() => setAiState('listening'), 1000); 
+        if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+        speakingTimeoutRef.current = setTimeout(() => setAiState('listening'), 1500); 
       };
 
       const aoReceberTextoDaIA = (textoBruto) => {
         const textoLimpo = limparMarkdown(textoBruto);
-        if (textoLimpo.length > 0) {
-          setChatLog(prev => [...prev, { role: 'bastian', text: textoLimpo }]);
-        }
+        if (textoLimpo.length > 0) setChatLog(prev => [...prev, { role: 'bastian', text: textoLimpo }]);
       };
 
       // =====================================================================
-      // O EXECUTOR DE FERRAMENTAS (Onde o Bastian opera o App)
+      // INTEGRAÇÃO TOTAL: CONECTANDO O CÉREBRO AOS STORES
       // =====================================================================
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
-        setAiState('processing'); // O painel fica amarelo indicando que ele está trabalhando
+        setAiState('processing'); 
         const { id, name, args } = functionCallInfo;
-        
         let resultadoDaOperacao = "";
+        const dataHoje = new Date().toISOString().split('T')[0];
 
         try {
-          if (name === "adicionarGasto") {
-            const { descricao, valor } = args;
-            // AQUI O SENHOR COLOCA SEU CÓDIGO DO SUPABASE
-            // await inserirGastoNoBanco(descricao, valor);
-            
-            console.log(`[App] Adicionando Gasto: ${descricao} - R$ ${valor}`);
-            resultadoDaOperacao = `Sucesso! Gasto com ${descricao} no valor de ${valor} foi salvo no banco.`;
-            setChatLog(prev => [...prev, { role: 'bastian', text: `🔧 Ação Executada: Gasto Adicionado (${descricao}).` }]);
-          } 
-          
-          else if (name === "adicionarEvento") {
-            const { titulo, detalhes } = args;
-            // AQUI O SENHOR COLOCA SEU CÓDIGO DO SUPABASE
-            // await inserirEventoNoBanco(titulo, detalhes);
-            
-            console.log(`[App] Adicionando Evento: ${titulo} - ${detalhes || ''}`);
-            resultadoDaOperacao = `Sucesso! O evento "${titulo}" foi agendado.`;
-            setChatLog(prev => [...prev, { role: 'bastian', text: `🔧 Ação Executada: Evento Criado (${titulo}).` }]);
-          }
+          switch (name) {
+            case "adicionar_despesa":
+              await useFinanceStore.getState().addTransaction({
+                amount: Number(args.valor), description: args.descricao, type: 'despesa',
+                category: args.categoria || 'Outros', date: dataHoje, status: 'pago'
+              });
+              resultadoDaOperacao = "Despesa adicionada ao fluxo de caixa.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `💸 Gasto Salvo: ${args.descricao}` }]);
+              break;
 
+            case "adicionar_receita":
+              await useFinanceStore.getState().addTransaction({
+                amount: Number(args.valor), description: args.descricao, type: 'receita',
+                category: args.categoria || 'Outros', date: dataHoje, status: 'pago'
+              });
+              resultadoDaOperacao = "Receita contabilizada.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `📈 Receita Adicionada: ${args.descricao}` }]);
+              break;
+
+            case "adicionar_agenda":
+              await useAgendaStore.getState().addAgendaItem({
+                title: args.titulo, date: args.data, time: args.hora || null
+              });
+              resultadoDaOperacao = "Evento agendado com sucesso.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `📅 Agendado: ${args.titulo}` }]);
+              break;
+
+            case "registrar_peso":
+              await useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', Number(args.peso), 'kg');
+              resultadoDaOperacao = "Peso registrado nas métricas de saúde.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `⚖️ Peso Gravado: ${args.peso} kg` }]);
+              break;
+
+            case "adicionar_treino":
+              await useFitnessStore.getState().addHealthLog('treino', args.modalidade, Number(args.duracao), 'min');
+              resultadoDaOperacao = "Treino computado no diário.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `🏋️ Treino Registrado: ${args.modalidade}` }]);
+              break;
+
+            case "adicionar_tarefa_inbox":
+              await useInboxStore.getState().addInboxTask(args.titulo, args.data || dataHoje);
+              resultadoDaOperacao = "Tarefa salva na caixa de entrada.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `📥 Inbox: ${args.titulo}` }]);
+              break;
+
+            case "adicionar_kanban":
+              await useKanbanStore.getState().addTask(args.titulo, args.status || 'backlog');
+              resultadoDaOperacao = "Cartão Kanban criado.";
+              setChatLog(prev => [...prev, { role: 'bastian', text: `📋 Kanban [${args.status || 'backlog'}]: ${args.titulo}` }]);
+              break;
+              
+            case "concluir_tarefa":
+              if (args.origem === 'inbox') {
+                await useInboxStore.getState().toggleInboxTask(args.id, false);
+                resultadoDaOperacao = "Tarefa do Inbox marcada como concluída.";
+                setChatLog(prev => [...prev, { role: 'bastian', text: `✅ Tarefa Concluída!` }]);
+              } 
+              else if (args.origem === 'agenda') {
+                await useAgendaStore.getState().toggleItemCompletion(args.id, false);
+                resultadoDaOperacao = "Evento da agenda marcado como concluído.";
+                setChatLog(prev => [...prev, { role: 'bastian', text: `✅ Compromisso Concluído!` }]);
+              }
+              break;
+
+            case "relatorio_diario":
+              resultadoDaOperacao = gerarContextoDinâmico();
+              setChatLog(prev => [...prev, { role: 'bastian', text: `📊 Consultando Bancos de Dados...` }]);
+              break;
+
+            default:
+              resultadoDaOperacao = "Sistema não reconheceu o comando de ferramenta.";
+          }
         } catch (erro) {
-          console.error("Erro ao executar ferramenta:", erro);
-          resultadoDaOperacao = "Ocorreu um erro no aplicativo ao tentar salvar os dados.";
+          console.error("[Bastian] Falha ao injetar no Store:", erro);
+          resultadoDaOperacao = "Houve um erro interno ao salvar no Supabase.";
         }
 
-        // Devolve o resultado para a IA para ela poder falar "Pronto, senhor!"
+        // Retorna a promessa concluída para a IA continuar falando
         if (liveConnectionRef.current) {
           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, resultadoDaOperacao);
         }
       };
 
-      // Passamos as 3 funções para o cérebro
-      liveConnectionRef.current = new GeminiLiveConnection(
-        aoReceberAudioDaIA, 
-        aoReceberTextoDaIA, 
-        aoReceberChamadaDeFuncao
-      );
-
-      await liveConnectionRef.current.conectar();
-      await audioManagerRef.current.inicializar(aoCaptarSom);
+      liveConnectionRef.current = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA, aoReceberChamadaDeFuncao);
+      
+      const contextoIncial = gerarContextoDinâmico();
+      await liveConnectionRef.current.conectar(contextoIncial);
+      await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio); 
 
       setAiState('listening');
 
     } catch (erro) {
       desligarSistema();
-      alert("Falha crítica no sistema de áudio.");
+      alert("Falha crítica no sistema neural.");
     }
   };
 
@@ -128,6 +206,8 @@ export default function Bastian() {
       liveConnectionRef.current.desconectar();
       liveConnectionRef.current = null;
     }
+    if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+    
     setIsIntercomActive(false);
     setAiState('idle');
   };
@@ -139,7 +219,6 @@ export default function Bastian() {
 
   useEffect(() => { return () => desligarSistema(); }, []);
 
-  // Estilos omitidos para brevidade (São idênticos aos anteriores)
   const getRingColorClass = () => {
     if (!isIntercomActive) return 'text-slate-600/40 drop-shadow-none';
     switch (aiState) {
@@ -215,7 +294,7 @@ export default function Bastian() {
           </p>
         </div>
 
-        <div className="relative flex items-center justify-center w-[260px] h-[260px] sm:w-[320px] sm:h-[320px] mb-12 transition-all duration-500">
+        <div className="relative flex items-center justify-center w-[260px] h-[260px] sm:w-[320px] sm:h-[320px] mb-8 transition-all duration-500">
           <div className="pointer-events-none absolute inset-0">
             <div className={`absolute inset-0 border-2 border-transparent border-t-current border-r-current rounded-full transition-colors duration-500 ${getRingColorClass()} ${aiState === 'processing' ? 'animate-[spin_1s_linear_infinite]' : 'animate-[spin_4s_linear_infinite]'}`}></div>
             <div className={`absolute inset-[5%] border-[3px] border-transparent border-b-current border-l-current rounded-full transition-colors duration-500 ${getRingColorClass()} ${aiState === 'processing' ? 'animate-[spin_1.5s_linear_reverse_infinite]' : 'animate-[spin_5s_linear_reverse_infinite]'}`}></div>
@@ -227,23 +306,24 @@ export default function Bastian() {
           <button 
             onClick={toggleIntercom}
             className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center backdrop-blur-md border-2 z-20 cursor-pointer active:scale-95 transition-all duration-300 ${getCoreStyles()}`}
+            title={!isIntercomActive ? "Ligar Sistema" : "Desligar Sistema"}
           >
             <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full transition-colors duration-300 ${!isIntercomActive ? 'bg-slate-700/80' : aiState === 'processing' ? 'bg-amber-300 animate-ping' : aiState === 'speaking' ? 'bg-emerald-300 animate-bounce' : 'bg-cyan-300 animate-pulse shadow-[0_0_20px_rgba(6,182,212,0.9)]'}`}></div>
             <div className="absolute w-2.5 h-2.5 sm:w-3 sm:h-3 bg-white/90 rounded-full shadow-[0_0_5px_rgba(255,255,255,1)]"></div>
           </button>
         </div>
 
-        <div className="w-full max-w-2xl h-12 flex items-center justify-center text-center px-4">
-            <p className={`text-[11px] sm:text-xs tracking-[0.2em] uppercase font-bold transition-colors duration-300 ${
+        <div className="w-full max-w-2xl flex flex-col items-center justify-center text-center px-4 gap-4">
+            <p className={`h-6 text-[11px] sm:text-xs tracking-[0.2em] uppercase font-bold transition-colors duration-300 ${
               aiState === 'listening' ? 'text-cyan-300 animate-pulse' :
               aiState === 'starting' ? 'text-cyan-200' :
               aiState === 'processing' ? 'text-amber-400 animate-pulse' :
               aiState === 'speaking' ? 'text-emerald-400' : 'text-slate-600'
             }`}>
               {aiState === 'listening' ? 'Conexão Estabelecida. Pode falar...' :
-               aiState === 'starting' ? 'Negociando WebSocket...' :
+               aiState === 'starting' ? 'Conectando Neural Link...' :
                aiState === 'processing' ? 'Executando Sistema...' :
-               aiState === 'speaking' ? 'Respondendo...' : 'Toque no centro para iniciar o Live Mode'}
+               aiState === 'speaking' ? 'Respondendo...' : 'Sistema inativo.'}
             </p>
         </div>
       </div>
