@@ -5,7 +5,6 @@ import { format } from 'date-fns';
 import { GeminiLiveConnection } from '../services/liveAiService';
 import { GerenciadorDeAudio } from '../services/audioManager';
 
-// IMPORTAÇÃO DOS SEUS STORES ZUSTAND
 import { useFinanceStore } from '../store/useFinanceStore';
 import { useAgendaStore } from '../store/useAgendaStore'; 
 import { useInboxStore } from '../store/useInboxStore';
@@ -22,9 +21,33 @@ export default function Bastian() {
   const audioManagerRef = useRef(null);
   const speakingTimeoutRef = useRef(null);
 
+  // =========================================================================
+  // SISTEMA DE NOTIFICAÇÕES VISUAIS DO NAVEGADOR
+  // =========================================================================
   useEffect(() => {
+    if (Notification.permission !== "granted") Notification.requestPermission();
+
+    const checarNotificacoes = () => {
+      const hoje = new Date().toISOString().split('T')[0];
+      const compromissosHoje = useAgendaStore.getState().agendaItems.filter(e => e.date === hoje && !e.is_completed);
+      const contasPendentes = useFinanceStore.getState().transactions.filter(t => t.date <= hoje && t.status === 'pendente');
+
+      if (compromissosHoje.length > 0) {
+        new Notification("Bastian: Agenda", { body: `Senhor, o senhor possui ${compromissosHoje.length} compromissos pendentes para hoje.` });
+      }
+      if (contasPendentes.length > 0) {
+        new Notification("Bastian: Finanças", { body: `Atenção: O senhor possui ${contasPendentes.length} pendências financeiras para hoje.` });
+      }
+    };
+
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    // Checa as notificações a cada 1 hora automaticamente
+    const notificacaoTimer = setInterval(checarNotificacoes, 1000 * 60 * 60);
+    
+    return () => {
+      clearInterval(timer);
+      clearInterval(notificacaoTimer);
+    };
   }, []);
 
   const getSaudacao = () => {
@@ -43,7 +66,10 @@ export default function Bastian() {
     const hoje = new Date().toISOString().split('T')[0];
     const saldo = useFinanceStore.getState().balance;
     
-    // Pegamos apenas o que NÃO está concluído e passamos o ID + Título para a IA
+    const financasPendentes = useFinanceStore.getState().transactions
+      .filter(t => t.status === 'pendente' && t.date <= hoje)
+      .map(t => ({ id: t.id, descricao: t.description, valor: t.amount, tipo: t.type, data: t.date }));
+
     const compromissos = useAgendaStore.getState().agendaItems
       .filter(e => e.date === hoje && !e.is_completed)
       .map(e => ({ id: e.id, titulo: e.title }));
@@ -55,7 +81,8 @@ export default function Bastian() {
     return `
       Memória Atual:
       - Saldo Atual: R$ ${saldo.toFixed(2)}
-      - Eventos Pendentes (Agenda): ${JSON.stringify(compromissos)}
+      - Transações Pendentes (Pagar/Receber Hoje): ${JSON.stringify(financasPendentes)}
+      - Eventos Pendentes (Agenda de Hoje): ${JSON.stringify(compromissos)}
       - Tarefas Pendentes (Inbox): ${JSON.stringify(pendencias)}
     `;
   };
@@ -90,9 +117,6 @@ export default function Bastian() {
         if (textoLimpo.length > 0) setChatLog(prev => [...prev, { role: 'bastian', text: textoLimpo }]);
       };
 
-      // =====================================================================
-      // INTEGRAÇÃO TOTAL: CONECTANDO O CÉREBRO AOS STORES
-      // =====================================================================
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
         setAiState('processing'); 
         const { id, name, args } = functionCallInfo;
@@ -106,7 +130,7 @@ export default function Bastian() {
                 amount: Number(args.valor), description: args.descricao, type: 'despesa',
                 category: args.categoria || 'Outros', date: dataHoje, status: 'pago'
               });
-              resultadoDaOperacao = "Despesa adicionada ao fluxo de caixa.";
+              resultadoDaOperacao = "Despesa salva.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `💸 Gasto Salvo: ${args.descricao}` }]);
               break;
 
@@ -115,7 +139,7 @@ export default function Bastian() {
                 amount: Number(args.valor), description: args.descricao, type: 'receita',
                 category: args.categoria || 'Outros', date: dataHoje, status: 'pago'
               });
-              resultadoDaOperacao = "Receita contabilizada.";
+              resultadoDaOperacao = "Receita salva.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `📈 Receita Adicionada: ${args.descricao}` }]);
               break;
 
@@ -123,25 +147,25 @@ export default function Bastian() {
               await useAgendaStore.getState().addAgendaItem({
                 title: args.titulo, date: args.data, time: args.hora || null
               });
-              resultadoDaOperacao = "Evento agendado com sucesso.";
+              resultadoDaOperacao = "Evento agendado.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `📅 Agendado: ${args.titulo}` }]);
               break;
 
             case "registrar_peso":
               await useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', Number(args.peso), 'kg');
-              resultadoDaOperacao = "Peso registrado nas métricas de saúde.";
+              resultadoDaOperacao = "Peso gravado.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `⚖️ Peso Gravado: ${args.peso} kg` }]);
               break;
 
             case "adicionar_treino":
               await useFitnessStore.getState().addHealthLog('treino', args.modalidade, Number(args.duracao), 'min');
-              resultadoDaOperacao = "Treino computado no diário.";
+              resultadoDaOperacao = "Treino salvo.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `🏋️ Treino Registrado: ${args.modalidade}` }]);
               break;
 
             case "adicionar_tarefa_inbox":
               await useInboxStore.getState().addInboxTask(args.titulo, args.data || dataHoje);
-              resultadoDaOperacao = "Tarefa salva na caixa de entrada.";
+              resultadoDaOperacao = "Tarefa salva.";
               setChatLog(prev => [...prev, { role: 'bastian', text: `📥 Inbox: ${args.titulo}` }]);
               break;
 
@@ -154,12 +178,12 @@ export default function Bastian() {
             case "concluir_tarefa":
               if (args.origem === 'inbox') {
                 await useInboxStore.getState().toggleInboxTask(args.id, false);
-                resultadoDaOperacao = "Tarefa do Inbox marcada como concluída.";
+                resultadoDaOperacao = "Tarefa do Inbox concluída.";
                 setChatLog(prev => [...prev, { role: 'bastian', text: `✅ Tarefa Concluída!` }]);
               } 
               else if (args.origem === 'agenda') {
                 await useAgendaStore.getState().toggleItemCompletion(args.id, false);
-                resultadoDaOperacao = "Evento da agenda marcado como concluído.";
+                resultadoDaOperacao = "Evento concluído.";
                 setChatLog(prev => [...prev, { role: 'bastian', text: `✅ Compromisso Concluído!` }]);
               }
               break;
@@ -170,14 +194,12 @@ export default function Bastian() {
               break;
 
             default:
-              resultadoDaOperacao = "Sistema não reconheceu o comando de ferramenta.";
+              resultadoDaOperacao = "Comando desconhecido.";
           }
         } catch (erro) {
-          console.error("[Bastian] Falha ao injetar no Store:", erro);
-          resultadoDaOperacao = "Houve um erro interno ao salvar no Supabase.";
+          resultadoDaOperacao = "Erro interno.";
         }
 
-        // Retorna a promessa concluída para a IA continuar falando
         if (liveConnectionRef.current) {
           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, resultadoDaOperacao);
         }
@@ -188,6 +210,17 @@ export default function Bastian() {
       const contextoIncial = gerarContextoDinâmico();
       await liveConnectionRef.current.conectar(contextoIncial);
       await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio); 
+
+      // =====================================================================
+      // O GATILHO PROATIVO DE IGNIÇÃO
+      // =====================================================================
+      setTimeout(() => {
+        if (liveConnectionRef.current) {
+          liveConnectionRef.current.enviarComandoSilencioso(
+            "O sistema acabou de ser ativado. Faça uma saudação executiva inicial, e analise a sua Memória Atual. Se houver compromissos na agenda de hoje ou contas a pagar/receber hoje, avise o usuário imediatamente na sua fala."
+          );
+        }
+      }, 1000); 
 
       setAiState('listening');
 

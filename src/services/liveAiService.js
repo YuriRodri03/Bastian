@@ -193,6 +193,15 @@ export class GeminiLiveConnection {
     }
   }
 
+  // NOVO: Função invisível para forçar a IA a falar quando o sistema liga
+  enviarComandoSilencioso(texto) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        clientContent: { turns: [{ role: "user", parts: [{ text: texto }] }], turnComplete: true }
+      }));
+    }
+  }
+
   forcarResposta() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ clientContent: { turnComplete: true } }));

@@ -3,71 +3,80 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import webpush from "npm:web-push@3.6.7";
 
-// 1. Configuração do Web Push usando as chaves secretas que salvamos
+// 1. Configuração do Web Push
 webpush.setVapidDetails(
-  'mailto:seu-email@dominio.com', // Coloque seu e-mail aqui
+  'mailto:seu-email@dominio.com', // IMPORTANTE: Coloque o seu e-mail real aqui
   Deno.env.get('VAPID_PUBLIC_KEY') ?? '',
   Deno.env.get('VAPID_PRIVATE_KEY') ?? ''
 );
 
 serve(async (req) => {
-  // Impede requisições de métodos não autorizados (opcional, mas recomendado)
   if (req.method !== 'POST') {
     return new Response('Método não permitido', { status: 405 });
   }
 
-  // 2. Inicia o Supabase com poderes de administrador (Service Role Key)
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // 3. Pega a data de hoje (Formato YYYY-MM-DD)
     const hoje = new Date().toISOString().split('T')[0];
 
-    // 4. Consulta exemplo: Contas vencendo hoje
-    const { data: contas } = await supabase
+    // 2. Busca Finanças Pendentes (Contas a pagar ou receber até hoje)
+    const { data: financas } = await supabase
       .from('transactions')
       .select('*')
-      .eq('tipo', 'despesa') // Ajuste de acordo com a coluna do seu banco
-      .eq('data', hoje);     // Ajuste de acordo com a coluna do seu banco
+      .lte('date', hoje)
+      .eq('status', 'pendente');
 
-    const totalContas = contas?.length || 0;
+    // 3. Busca Agenda do Dia (Compromissos não concluídos de hoje)
+    const { data: agenda } = await supabase
+      .from('agenda_items')
+      .select('*')
+      .eq('date', hoje)
+      .eq('is_completed', false);
 
-    // Se não houver nada, encerra a função silenciosamente
-    if (totalContas === 0) {
+    const totalFinancas = financas?.length || 0;
+    const totalAgenda = agenda?.length || 0;
+
+    // Se o dia estiver livre, encerra silenciosamente
+    if (totalFinancas === 0 && totalAgenda === 0) {
       return new Response(JSON.stringify({ message: 'Tudo limpo para hoje.' }), { status: 200 });
     }
 
-    // 5. Busca as inscrições ativas dos seus dispositivos
+    // 4. Busca os celulares/PCs cadastrados para receber notificação
     const { data: subscriptions } = await supabase
       .from('push_subscriptions')
       .select('*');
 
     if (!subscriptions || subscriptions.length === 0) {
-      return new Response(JSON.stringify({ message: 'Nenhum dispositivo cadastrado.' }), { status: 200 });
+      return new Response(JSON.stringify({ message: 'Nenhum dispositivo.' }), { status: 200 });
     }
 
-    // A mensagem que vai aparecer no seu celular/PC
+    // 5. Monta o Briefing para a tela do celular
+    let bodyMsg = '';
+    if (totalAgenda > 0) bodyMsg += `Tem ${totalAgenda} compromisso(s) na agenda. `;
+    if (totalFinancas > 0) bodyMsg += `Atenção: ${totalFinancas} movimentação(ões) pendente(s).`;
+
     const notificationPayload = JSON.stringify({
-      title: 'Bastian AI',
-      body: `Senhor, temos ${totalContas} despesa(s) agendada(s) para hoje.`,
-      url: '/financeiro'
+      title: 'Bastian Executivo',
+      body: bodyMsg.trim(),
+      url: '/' // Abre a home do PWA ao clicar
     });
 
-    // 6. Dispara para todos os seus dispositivos cadastrados
+    // 6. Dispara o choque para o Service Worker do celular
     const promessas = subscriptions.map(async (sub) => {
-      const pushConfig = {
-        endpoint: sub.endpoint,
-        keys: { auth: sub.auth_key, p256dh: sub.p256dh_key }
-      };
-
+      // Pega o objeto JSON inteiro que o frontend salvou
+      const pushSubscription = sub.subscription; 
+      
       try {
-        await webpush.sendNotification(pushConfig, notificationPayload);
-      } catch (err) {
-        // Erro 410 significa que a permissão foi revogada no dispositivo
-        if (err.statusCode === 410) {
-          await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        await webpush.sendNotification(pushSubscription, notificationPayload);
+      } catch (err: any) {
+        // Erro 410 ou 404 significa que o aplicativo foi desinstalado do celular
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await supabase.from('push_subscriptions').delete().eq('id', sub.id);
+        } else {
+          console.error("Erro no WebPush:", err);
         }
       }
     });
@@ -79,7 +88,7 @@ serve(async (req) => {
       status: 200,
     });
 
-  } catch (error) {
+  } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 });
