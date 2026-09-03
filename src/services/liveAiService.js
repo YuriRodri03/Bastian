@@ -59,7 +59,8 @@ export class GeminiLiveConnection {
             - Responda de forma direta, concisa e natural em Português do Brasil.
             - NUNCA utilize formatação Markdown.
             - Sempre que o usuário der uma ordem que corresponda a uma de suas ferramentas (ex: "adicione 50 reais de gasolina", "agende um estudo", "peso de hoje é 80", "coloque no kanban para ler o artigo"), chame a função ANTES de responder.
-            - Para concluir uma tarefa ou compromisso, olhe o ID correspondente na sua Memória Atual e use a ferramenta 'concluir_tarefa'.`
+            - Para concluir uma tarefa ou compromisso, olhe o ID correspondente na sua Memória Atual e use a ferramenta 'concluir_tarefa'.
+            - Para excluir algo ou editar, use 'deletar_registro' (e no caso de edição, recrie com os dados novos em seguida).`
           }]
         },
 
@@ -167,6 +168,19 @@ export class GeminiLiveConnection {
                   },
                   required: ["id", "origem"]
                 }
+              },
+              // A NOVA FERRAMENTA DE EXCLUSÃO (DELETAR/EDITAR)
+              {
+                name: "deletar_registro",
+                description: "Apaga um registro existente do banco de dados (finanças, agenda, inbox, kanban). Use o ID exato lido na sua Memória.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    id: { type: "STRING", description: "O ID único do registro a ser apagado." },
+                    modulo: { type: "STRING", description: "O módulo do registro: 'financeiro', 'agenda', 'inbox' ou 'kanban'." }
+                  },
+                  required: ["id", "modulo"]
+                }
               }
             ]
           }
@@ -193,7 +207,6 @@ export class GeminiLiveConnection {
     }
   }
 
-  // NOVO: Função invisível para forçar a IA a falar quando o sistema liga
   enviarComandoSilencioso(texto) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase'; // Ajuste o caminho se necessário
+import { supabase } from '../lib/supabase'; 
 import { useAuthStore } from './useAuthStore';
 
 export const useAgendaStore = create((set, get) => ({
@@ -32,12 +32,11 @@ export const useAgendaStore = create((set, get) => ({
   addAgendaItem: async (item) => {
     set({ isLoading: true, error: null });
     
-    // Pegamos o ID do usuário logado diretamente do useAuthStore
     const userId = useAuthStore.getState().user?.id;
     
     if (!userId) {
       set({ error: 'Usuário não autenticado', isLoading: false });
-      return;
+      throw new Error('Usuário não autenticado'); // Repassa o erro
     }
 
     try {
@@ -48,11 +47,12 @@ export const useAgendaStore = create((set, get) => ({
 
       if (error) throw error;
       
-      // Atualiza o estado local adicionando o novo item sem precisar recarregar a página
       set((state) => ({ agendaItems: [...state.agendaItems, data[0]] }));
+      return data[0];
     } catch (error) {
       set({ error: error.message });
-      console.error('Erro ao adicionar item:', error);
+      console.error('[Supabase] Erro Crítico ao adicionar item na Agenda:', error);
+      throw error; // O SEGREDO ESTÁ AQUI: Isso faz o Bastian saber que falhou!
     } finally {
       set({ isLoading: false });
     }
@@ -71,7 +71,6 @@ export const useAgendaStore = create((set, get) => ({
 
       if (error) throw error;
 
-      // Atualiza o item específico na lista local para refletir na UI instantaneamente
       set((state) => ({
         agendaItems: state.agendaItems.map((item) =>
           item.id === id ? { ...item, ...data[0] } : item
@@ -80,6 +79,7 @@ export const useAgendaStore = create((set, get) => ({
     } catch (error) {
       set({ error: error.message });
       console.error('Erro ao atualizar item:', error);
+      throw error;
     } finally {
       set({ isLoading: false });
     }
@@ -97,13 +97,13 @@ export const useAgendaStore = create((set, get) => ({
 
       if (error) throw error;
 
-      // Remove o item da lista local
       set((state) => ({
         agendaItems: state.agendaItems.filter((item) => item.id !== id),
       }));
     } catch (error) {
       set({ error: error.message });
       console.error('Erro ao deletar item:', error);
+      throw error;
     } finally {
       set({ isLoading: false });
     }
@@ -119,7 +119,6 @@ export const useAgendaStore = create((set, get) => ({
 
       if (error) throw error;
 
-      // Atualiza a interface instantaneamente
       set((state) => ({
         agendaItems: state.agendaItems.map((item) =>
           item.id === id ? { ...item, is_completed: !currentStatus } : item
@@ -127,6 +126,7 @@ export const useAgendaStore = create((set, get) => ({
       }));
     } catch (error) {
       console.error('Erro ao atualizar status:', error);
+      throw error;
     }
   }
 }));

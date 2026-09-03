@@ -21,22 +21,15 @@ export default function BarraComandoIA() {
   const speakingTimeoutRef = useRef(null);
   const mensagemTimeoutRef = useRef(null);
 
-  // =========================================================================
-  // NOVOS MÓDULOS DE MEMÓRIA DE CURTO PRAZO
-  // =========================================================================
-  const hasGreetedRef = useRef(false); // Trava para não repetir o relatório inicial
-  const sessionMemoryRef = useRef([]); // Guarda o histórico da conversa atual
+  const hasGreetedRef = useRef(false); 
+  const sessionMemoryRef = useRef([]); 
 
   const limparMarkdown = (texto) => {
     if (!texto) return '';
     return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
-  // =========================================================================
-  // MENTE DO BASTIAN (COM RELÓGIO E REGRAS CRÍTICAS)
-  // =========================================================================
   const gerarContextoDinâmico = () => {
-    // O Bastian agora sabe exatamente em que dia e hora está vivendo
     const dataHojeExata = new Date().toISOString().split('T')[0];
     const horaAtualExata = new Date().toLocaleTimeString();
 
@@ -47,7 +40,6 @@ export default function BarraComandoIA() {
     const kanban = useKanbanStore.getState().tasks.map(t => ({ id: t.id, titulo: t.title, status: t.status }));
     const historicoSaude = useFitnessStore.getState().healthLogs.map(l => ({ categoria: l.type, registro: l.name, valor: l.value, unidade: l.unit, data: l.date }));
     
-    // Pega as últimas falas do Bastian para ele saber o que acabou de dizer
     const historicoRecente = sessionMemoryRef.current
       .slice(-5) 
       .map(msg => `[${msg.hora}] Você disse: ${msg.texto}`)
@@ -71,9 +63,10 @@ export default function BarraComandoIA() {
 
       REGRAS CRÍTICAS DE COMPORTAMENTO:
       1. NÃO REPITA INFORMAÇÕES: Se o histórico de curto prazo mostrar que você já deu uma resposta, não a repita a menos que o usuário peça.
-      2. OBRIGAÇÃO DE USAR FERRAMENTAS: Se o usuário pedir para agendar, criar tarefa ou registrar gasto/peso, VOCÊ DEVE OBRIGATORIAMENTE usar a respectiva "Function/Tool". 
-      3. FORMATO DE DATA: Quando usar uma ferramenta de agendamento, calcule a data baseada na "Data de Hoje" e passe ESTRITAMENTE no formato YYYY-MM-DD.
-      4. NUNCA minta dizendo que agendou algo se você não tiver executado a chamada de função correspondente.
+      2. OBRIGAÇÃO DE USAR FERRAMENTAS: Se o usuário pedir para agendar, criar, registrar ou APAGAR algo, VOCÊ DEVE OBRIGATORIAMENTE usar a respectiva "Function/Tool". 
+      3. PARA MODIFICAR/EDITAR ALGO: Se o usuário pedir para corrigir ou alterar um registro, você DEVE acionar a ferramenta 'deletar_registro' enviando o ID do item antigo e, em seguida, acionar a ferramenta de adicionar (ex: adicionar_despesa) para criar o registro novo corrigido.
+      4. FORMATO DE DATA: Quando usar ferramentas, calcule a data baseada na "Data de Hoje" e passe ESTRITAMENTE no formato YYYY-MM-DD.
+      5. NUNCA minta dizendo que fez algo sem ter executado a função correspondente.
     `;
   };
 
@@ -112,7 +105,6 @@ export default function BarraComandoIA() {
         const textoLimpo = limparMarkdown(textoBruto);
         if (textoLimpo.length > 0) {
           exibirMensagem(textoLimpo);
-          // Grava a fala do Bastian na memória de curto prazo
           sessionMemoryRef.current.push({
             hora: new Date().toLocaleTimeString(),
             texto: textoLimpo
@@ -125,7 +117,6 @@ export default function BarraComandoIA() {
         const { id, name, args } = functionCallInfo;
         let resultadoDaOperacao = "";
         
-        // Puxa a data novamente apenas por segurança
         const dataHoje = new Date().toISOString().split('T')[0];
 
         try {
@@ -163,7 +154,7 @@ export default function BarraComandoIA() {
             case "adicionar_kanban":
               await useKanbanStore.getState().addTask(args.titulo, args.status || 'backlog');
               resultadoDaOperacao = "Cartão Kanban criado.";
-              exibirMensagem(`📋 Kanban [${args.status || 'backlog'}]: ${args.titulo}`);
+              exibirMensagem(`📋 Kanban: ${args.titulo}`);
               break;
             case "concluir_tarefa":
               if (args.origem === 'inbox') { await useInboxStore.getState().toggleInboxTask(args.id, false); resultadoDaOperacao = "Tarefa concluída."; exibirMensagem(`✅ Tarefa Concluída!`); } 
@@ -173,11 +164,24 @@ export default function BarraComandoIA() {
               resultadoDaOperacao = gerarContextoDinâmico();
               exibirMensagem(`📊 Consultando Bancos de Dados...`);
               break;
+            
+            // O NOVO MÓDULO DE EXCLUSÃO
+            case "deletar_registro":
+              if (args.modulo === 'financeiro') await useFinanceStore.getState().deleteTransaction(args.id);
+              else if (args.modulo === 'agenda') await useAgendaStore.getState().deleteAgendaItem(args.id);
+              else if (args.modulo === 'inbox') await useInboxStore.getState().deleteInboxTask(args.id);
+              else if (args.modulo === 'kanban') await useKanbanStore.getState().deleteTask(args.id);
+              
+              resultadoDaOperacao = "Registro removido do banco de dados.";
+              exibirMensagem(`🗑️ Registro apagado.`);
+              break;
+
             default:
               resultadoDaOperacao = "Comando desconhecido.";
           }
         } catch (erro) {
-          resultadoDaOperacao = "Erro interno.";
+          console.error(erro);
+          resultadoDaOperacao = "Erro interno ao executar a função. Verifique o ID ou o nome da função no Store.";
         }
 
         if (liveConnectionRef.current) liveConnectionRef.current.enviarRespostaDeFuncao(id, name, resultadoDaOperacao);
@@ -187,14 +191,13 @@ export default function BarraComandoIA() {
       await liveConnectionRef.current.conectar(gerarContextoDinâmico());
       await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio); 
 
-      // LÓGICA DE SAUDAÇÃO INTELIGENTE
       setTimeout(() => {
         if (liveConnectionRef.current) {
           if (!hasGreetedRef.current) {
             liveConnectionRef.current.enviarComandoSilencioso("Sistema Global ativado pela primeira vez hoje. Faça uma saudação executiva curta. Cruze a Memória de Longo Prazo com a data de hoje e alerte se houver pendências cruciais.");
             hasGreetedRef.current = true;
           } else {
-            liveConnectionRef.current.enviarComandoSilencioso("O usuário reabriu a comunicação de voz. NÃO faça o relatório inicial novamente. Apenas diga algo muito curto como 'Ouvindo, senhor', 'Pronto' ou 'Pois não?'.");
+            liveConnectionRef.current.enviarComandoSilencioso("O usuário reabriu a comunicação de voz. NÃO repita o relatório inicial. Apenas diga algo curto como 'Ouvindo', ou 'Pronto'.");
           }
         }
       }, 1000); 
@@ -246,7 +249,6 @@ export default function BarraComandoIA() {
   return (
     <div className="fixed bottom-6 right-4 sm:right-8 z-50 flex flex-col items-end gap-3 pointer-events-none">
       
-      {/* BALÃO DE FALA FLUTUANTE */}
       {ultimaMensagem && (
         <div className="pointer-events-auto max-w-[280px] sm:max-w-xs bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-2xl rounded-br-sm shadow-2xl animate-in fade-in slide-in-from-bottom-5">
           <div className="flex items-start gap-3">
@@ -260,7 +262,6 @@ export default function BarraComandoIA() {
         </div>
       )}
 
-      {/* ORBE MINIMALISTA */}
       <div className="pointer-events-auto relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 transition-all duration-300">
         
         {isIntercomActive && (
