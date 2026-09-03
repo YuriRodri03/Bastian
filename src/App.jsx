@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Toaster } from 'react-hot-toast';
 
-// IMPORTS DOS STORES ZUSTAND (Importando todos agora)
+// IMPORTS DOS STORES ZUSTAND
 import { useAuthStore } from './store/useAuthStore';
 import { useAgendaStore } from './store/useAgendaStore'; 
 import { useFinanceStore } from './store/useFinanceStore';
@@ -11,12 +11,11 @@ import { useInboxStore } from './store/useInboxStore';
 import { useKanbanStore } from './store/useKanbanStore';
 import { useFitnessStore } from './store/useFitnessStore';
 
-// IMPORT DO SERVIÇO DE PUSH NOTIFICATION (Adicionado)
+// IMPORT DO SERVIÇO DE PUSH NOTIFICATION
 import { registrarPushNoCelular } from './services/pushService';
 
-// imports das páginas
+// IMPORTS DAS PÁGINAS (A antiga página Bastian foi removida do núcleo)
 import Login from './pages/Login';
-import Bastian from './pages/Bastian';
 import Dashboard from './pages/Dashboard'; 
 import Financeiro from './pages/Financeiro';
 import Agenda from './pages/Agenda';
@@ -71,14 +70,13 @@ function App() {
 
   const [showLoading, setShowLoading] = useState(true);
 
-  // MOTOR 1: INICIALIZAÇÃO DE AUTENTICAÇÃO (Roda só 1 vez)
+  // MOTOR 1: INICIALIZAÇÃO DE AUTENTICAÇÃO
   useEffect(() => {
     initialize();
   }, [initialize]);
 
   // =====================================================================
   // MOTOR 2: CARREGAMENTO GLOBAL DE DADOS (Pré-Load) E REGISTRO PUSH
-  // O Segredo do Bastian: Agora ele sabe de tudo antes mesmo do senhor pedir.
   // =====================================================================
   useEffect(() => {
     if (user) {
@@ -88,7 +86,7 @@ function App() {
       if (fetchKanbanTasks) fetchKanbanTasks();
       if (fetchHealthLogs) fetchHealthLogs();
       
-      // A MÁGICA ACONTECE AQUI: Registra o aparelho no banco de dados silenciosamente
+      // Registra o aparelho no banco de dados silenciosamente
       registrarPushNoCelular(); 
     }
   }, [user, fetchAgendaItems, fetchTransactions, fetchInboxTasks, fetchKanbanTasks, fetchHealthLogs]);
@@ -97,7 +95,6 @@ function App() {
   // MOTOR 3: NOTIFICAÇÕES E VIGIA DA AGENDA (Seguro contra Loops)
   // =====================================================================
   
-  // Guardamos a agenda na memória RAM isolada para não forçar recarregamentos
   const agendaRef = useRef(agendaItems);
   useEffect(() => {
     agendaRef.current = agendaItems;
@@ -106,7 +103,6 @@ function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Pede permissão na primeira vez
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().then(permission => {
         if (permission === 'granted') {
@@ -115,7 +111,6 @@ function App() {
       });
     }
 
-    // Relógio Vigia (Acorda a cada 60 segundos)
     const vigiaInterval = setInterval(() => {
       if ('Notification' in window && Notification.permission !== 'granted') return;
 
@@ -127,7 +122,6 @@ function App() {
       const horaAtual = agora.getHours();
       const minAtual = agora.getMinutes();
 
-      // Usa o valor sempre atualizado da memória sem causar loop
       const compromissos = agendaRef.current || [];
 
       compromissos.forEach(evento => {
@@ -138,7 +132,6 @@ function App() {
           const minutosAgora = (horaAtual * 60) + minAtual;
           const diferenca = minutosEvento - minutosAgora;
 
-          // Se faltarem EXATAMENTE 15 minutos
           if (diferenca === 15) {
             dispararNotificacaoBastian(
               'Aviso de Compromisso', 
@@ -180,7 +173,6 @@ function App() {
     }
   }, [isLoading]);
 
-  // Renderização da tela de carregamento cibernética
   if (showLoading) {
       return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center relative overflow-hidden font-mono select-none">
@@ -241,7 +233,8 @@ function App() {
 
       <main className="bg-slate-950 min-h-screen text-slate-100 pb-24">
         <Routes>
-          <Route path="/" element={<Bastian />} />
+          {/* Rota principal substituída pelo Dashboard */}
+          <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/financeiro" element={<Financeiro />} />
           <Route path="/agenda" element={<Agenda />} />
@@ -249,6 +242,7 @@ function App() {
         </Routes>
       </main>
 
+      {/* A mente onipresente do Bastian */}
       <BarraComandoIA />
       
     </BrowserRouter>
