@@ -169,7 +169,6 @@ export class GeminiLiveConnection {
                   required: ["id", "origem"]
                 }
               },
-              // A NOVA FERRAMENTA DE EXCLUSÃO (DELETAR/EDITAR)
               {
                 name: "deletar_registro",
                 description: "Apaga um registro existente do banco de dados (finanças, agenda, inbox, kanban). Use o ID exato lido na sua Memória.",
@@ -221,12 +220,18 @@ export class GeminiLiveConnection {
     }
   }
 
+  // =========================================================================
+  // CORREÇÃO CRÍTICA: O formato foi atualizado para ToolResponse
+  // =========================================================================
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const msg = {
-        clientContent: {
-          turnComplete: true, 
-          parts: [{ functionResponse: { id: idChamada, name: nomeFuncao, response: { result: resultado } } }]
+        toolResponse: {
+          functionResponses: [{
+            id: idChamada,
+            name: nomeFuncao,
+            response: { result: resultado }
+          }]
         }
       };
       this.ws.send(JSON.stringify(msg));
