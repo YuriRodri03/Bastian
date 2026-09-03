@@ -1,27 +1,31 @@
-<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <!-- Fundo escuro (Slate 950 do Tailwind) -->
-  <circle cx="256" cy="256" r="256" fill="#020617"/>
-
-  <!-- Anel Externo Fino (Cyan 600) -->
-  <circle cx="256" cy="256" r="220" fill="none" stroke="#0891b2" stroke-width="8"/>
-
-  <!-- Anel Tracejado (Cyan 500) -->
-  <circle cx="256" cy="256" r="170" fill="none" stroke="#06b6d4" stroke-width="24" stroke-dasharray="40 24"/>
-
-  <!-- Linhas HUD / Mira (Cyan 400) -->
-  <line x1="256" y1="20" x2="256" y2="80" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/>
-  <line x1="256" y1="432" x2="256" y2="492" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/>
-  <line x1="20" y1="256" x2="80" y2="256" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/>
-  <line x1="432" y1="256" x2="492" y2="256" stroke="#22d3ee" stroke-width="16" stroke-linecap="round"/>
-
-  <!-- Anel Interno Sólido (Cyan 400) -->
-  <circle cx="256" cy="256" r="100" fill="none" stroke="#22d3ee" stroke-width="12" />
-
-  <!-- Efeito de Brilho / Núcleo Central -->
-  <!-- Camada 1: Aura grande e fraca -->
-  <circle cx="256" cy="256" r="80" fill="#06b6d4" opacity="0.3"/>
-  <!-- Camada 2: Brilho médio -->
-  <circle cx="256" cy="256" r="50" fill="#22d3ee" opacity="0.6"/>
-  <!-- Camada 3: Núcleo quente (Cyan 100) -->
-  <circle cx="256" cy="256" r="30" fill="#cffafe" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Gradiente de energia do núcleo -->
+    <radialGradient id="auraGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.6"/>
+      <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  
+  <!-- Base Circular Escura (Os cantos fora do r=240 ficam invisíveis) -->
+  <circle cx="256" cy="256" r="240" fill="#020617" />
+  
+  <!-- Aura de Energia -->
+  <circle cx="256" cy="256" r="240" fill="url(#auraGlow)" />
+  
+  <!-- Anel Externo Fino -->
+  <circle cx="256" cy="256" r="215" fill="none" stroke="#0891b2" stroke-width="6" opacity="0.8" />
+  
+  <!-- Anel Tracejado Principal (Idêntico ao app) -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#22d3ee" stroke-width="16" stroke-dasharray="30 20" />
+  
+  <!-- Anel Interno Sólido -->
+  <circle cx="256" cy="256" r="120" fill="none" stroke="#06b6d4" stroke-width="4" />
+  
+  <!-- Núcleo da Inteligência Artificial -->
+  <circle cx="256" cy="256" r="50" fill="#22d3ee" />
+  
+  <!-- Ponto de Foco Central -->
+  <circle cx="256" cy="256" r="15" fill="#ffffff" />
 </svg>
