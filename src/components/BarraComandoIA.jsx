@@ -32,7 +32,14 @@ export default function BarraComandoIA() {
     return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
+  // =========================================================================
+  // MENTE DO BASTIAN (COM RELÓGIO E REGRAS CRÍTICAS)
+  // =========================================================================
   const gerarContextoDinâmico = () => {
+    // O Bastian agora sabe exatamente em que dia e hora está vivendo
+    const dataHojeExata = new Date().toISOString().split('T')[0];
+    const horaAtualExata = new Date().toLocaleTimeString();
+
     const saldo = useFinanceStore.getState().balance;
     const transacoes = useFinanceStore.getState().transactions.map(t => ({ id: t.id, descricao: t.description, valor: t.amount, tipo: t.type, data: t.date, status: t.status }));
     const compromissos = useAgendaStore.getState().agendaItems.map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, concluido: e.is_completed }));
@@ -42,11 +49,15 @@ export default function BarraComandoIA() {
     
     // Pega as últimas falas do Bastian para ele saber o que acabou de dizer
     const historicoRecente = sessionMemoryRef.current
-      .slice(-5) // Lembra das últimas 5 interações
+      .slice(-5) 
       .map(msg => `[${msg.hora}] Você disse: ${msg.texto}`)
       .join(' | ');
 
     return `
+      INFORMAÇÕES DO SISTEMA (TEMPO REAL):
+      - Data de Hoje: ${dataHojeExata}
+      - Hora Atual: ${horaAtualExata}
+
       Memória de Longo Prazo Atualizada:
       - Saldo Atual: R$ ${saldo.toFixed(2)}
       - Fluxo de Caixa: ${JSON.stringify(transacoes)}
@@ -58,7 +69,11 @@ export default function BarraComandoIA() {
       Memória de Curto Prazo (O que você acabou de falar com o usuário):
       ${historicoRecente || 'Nenhuma conversa recente ainda.'}
 
-      REGRA CRÍTICA: Se o histórico recente mostrar que você já deu uma informação, não a repita a menos que o usuário peça.
+      REGRAS CRÍTICAS DE COMPORTAMENTO:
+      1. NÃO REPITA INFORMAÇÕES: Se o histórico de curto prazo mostrar que você já deu uma resposta, não a repita a menos que o usuário peça.
+      2. OBRIGAÇÃO DE USAR FERRAMENTAS: Se o usuário pedir para agendar, criar tarefa ou registrar gasto/peso, VOCÊ DEVE OBRIGATORIAMENTE usar a respectiva "Function/Tool". 
+      3. FORMATO DE DATA: Quando usar uma ferramenta de agendamento, calcule a data baseada na "Data de Hoje" e passe ESTRITAMENTE no formato YYYY-MM-DD.
+      4. NUNCA minta dizendo que agendou algo se você não tiver executado a chamada de função correspondente.
     `;
   };
 
@@ -109,6 +124,8 @@ export default function BarraComandoIA() {
         setAiState('processing'); 
         const { id, name, args } = functionCallInfo;
         let resultadoDaOperacao = "";
+        
+        // Puxa a data novamente apenas por segurança
         const dataHoje = new Date().toISOString().split('T')[0];
 
         try {
@@ -174,11 +191,9 @@ export default function BarraComandoIA() {
       setTimeout(() => {
         if (liveConnectionRef.current) {
           if (!hasGreetedRef.current) {
-            // Primeira vez que o senhor liga ele na sessão
             liveConnectionRef.current.enviarComandoSilencioso("Sistema Global ativado pela primeira vez hoje. Faça uma saudação executiva curta. Cruze a Memória de Longo Prazo com a data de hoje e alerte se houver pendências cruciais.");
             hasGreetedRef.current = true;
           } else {
-            // Religando o microfone após já ter falado antes
             liveConnectionRef.current.enviarComandoSilencioso("O usuário reabriu a comunicação de voz. NÃO faça o relatório inicial novamente. Apenas diga algo muito curto como 'Ouvindo, senhor', 'Pronto' ou 'Pois não?'.");
           }
         }
