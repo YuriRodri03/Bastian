@@ -40,15 +40,13 @@ export const useFinanceStore = create((set, get) => ({
 
   // 2. Criar
   addTransaction: async (transactionData) => {
-    // 1. Pega o usuário logado atualmente para garantir o vínculo de segurança
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
       console.error("Usuário não autenticado:", userError);
-      return;
+      throw new Error("Usuário não autenticado"); // Alerta de falha repassado
     }
 
-    // 2. Remove o id temporário e injeta o user_id explicitamente
     const { id, ...dataToInsert } = transactionData;
     const payload = {
       ...dataToInsert,
@@ -62,8 +60,8 @@ export const useFinanceStore = create((set, get) => ({
       .single();
 
     if (error) {
-      console.error("Erro detalhado ao adicionar:", error.message, error.details, error.hint);
-      return;
+      console.error("[Supabase] Erro detalhado ao adicionar:", error.message, error.details, error.hint);
+      throw error; // Alerta crítico repassado para o Bastian
     }
 
     const currentTransactions = get().transactions;
@@ -93,7 +91,7 @@ export const useFinanceStore = create((set, get) => ({
 
     if (error) {
       console.error("Erro ao atualizar:", error);
-      return;
+      throw error; // Alerta crítico
     }
 
     const currentTransactions = get().transactions;
@@ -107,8 +105,8 @@ export const useFinanceStore = create((set, get) => ({
     });
   },
 
-  // 4. Deletar
-  removeTransaction: async (id) => {
+  // 4. Deletar (Renomeado para sincronizar com a BarraComandoIA)
+  deleteTransaction: async (id) => {
     const { error } = await supabase
       .from('transactions')
       .delete()
@@ -116,7 +114,7 @@ export const useFinanceStore = create((set, get) => ({
 
     if (error) {
       console.error("Erro ao remover:", error);
-      return;
+      throw error; // Alerta crítico
     }
 
     const currentTransactions = get().transactions;
@@ -144,7 +142,7 @@ export const useFinanceStore = create((set, get) => ({
 
     if (error) {
       console.error("Erro ao mudar status:", error);
-      return;
+      throw error; // Alerta crítico
     }
 
     const currentTransactions = get().transactions;

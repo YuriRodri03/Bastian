@@ -47,44 +47,48 @@ export class GerenciadorDeAudio {
     this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
     
     // =====================================================================
-    // O DETECTOR DE SILÊNCIO (Recalibrado para ignorar chiados)
+    // O DETECTOR DE SILÊNCIO (Ultra rápido e com bloqueio de retorno)
     // =====================================================================
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 512;
     this.analyser.minDecibels = -50; 
-    this.analyser.smoothingTimeConstant = 0.2; // Reage mais rápido quando o senhor para de falar
+    this.analyser.smoothingTimeConstant = 0.2; 
     this.source.connect(this.analyser);
 
     const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
     
     const monitorarVolume = () => {
       if (!this.analyser) return;
-      this.analyser.getByteFrequencyData(dataArray);
       
+      // 1. ESCUDO ACÚSTICO: Verifica se a IA está falando neste exato momento
+      const isAiSpeaking = this.audioContext && (this.audioContext.currentTime < this.nextPlayTime);
+
+      this.analyser.getByteFrequencyData(dataArray);
       let soma = 0;
       for (let i = 0; i < dataArray.length; i++) soma += dataArray[i];
       let volumeMedio = soma / dataArray.length;
-
-      // Aumentamos o limite para 15 (antes era 5). Ele vai ignorar estática e ventiladores pequenos.
       const LIMITE_DE_RUIDO = 15;
 
-      if (volumeMedio > LIMITE_DE_RUIDO) { 
-        // O SENHOR ESTÁ FALANDO (O volume superou o ruído de fundo)
-        if (this.silenceTimer) {
-          clearTimeout(this.silenceTimer);
-          this.silenceTimer = null;
-        }
-        this.isTalking = true;
-      } else { 
-        // SILÊNCIO DETECTADO (O volume caiu para o nível do ruído de fundo)
-        if (this.isTalking && !this.silenceTimer) {
-          this.silenceTimer = setTimeout(() => {
-            this.isTalking = false;
-            console.log("[Bastian Core] Silêncio detectado. Forçando resposta da IA...");
-            if (onSilenceDetected) onSilenceDetected(); // Dispara o "Câmbio" invisível
-          }, 1500); // Exatos 1.5s após o senhor parar de falar
+      // 2. Se a IA estiver falando, ignoramos o volume do microfone para não cortar a voz dela
+      if (!isAiSpeaking) {
+        if (volumeMedio > LIMITE_DE_RUIDO) { 
+          // O usuário está falando
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+            this.silenceTimer = null;
+          }
+          this.isTalking = true;
+        } else { 
+          // O usuário parou de falar
+          if (this.isTalking && !this.silenceTimer) {
+            this.silenceTimer = setTimeout(() => {
+              this.isTalking = false;
+              if (onSilenceDetected) onSilenceDetected(); // Muda para laranja (Processando)
+            }, 800); // Reduzido de 1500 para 800ms. Muito mais veloz!
+          }
         }
       }
+      
       requestAnimationFrame(monitorarVolume);
     };
     monitorarVolume();
@@ -127,13 +131,14 @@ export class GerenciadorDeAudio {
     reprodutor.connect(this.audioContext.destination);
     
     const tempoAtual = this.audioContext.currentTime;
-    if (tempoAtual < this.nextPlayTime) {
-       reprodutor.start(this.nextPlayTime);
-       this.nextPlayTime += audioBuffer.duration;
-    } else {
-       reprodutor.start(tempoAtual);
-       this.nextPlayTime = tempoAtual + audioBuffer.duration;
+    
+    // AMORTECEDOR DE REDE: Evita que a voz "engasgue" se a internet der um pico
+    if (tempoAtual >= this.nextPlayTime) {
+       this.nextPlayTime = tempoAtual + 0.1; // Adiciona 100ms de respiro
     }
+    
+    reprodutor.start(this.nextPlayTime);
+    this.nextPlayTime += audioBuffer.duration;
   }
 
   parar() {

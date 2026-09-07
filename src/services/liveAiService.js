@@ -56,6 +56,7 @@ export class GeminiLiveConnection {
             ${contextoDoSistema}
             
             [REGRAS DE CONVERSA E AÇÃO]
+            - NUNCA verbalize, escreva ou narre o seu processo de pensamento, justificativas ou análises internas. Entregue APENAS a resposta final.
             - Responda de forma direta, concisa e natural em Português do Brasil.
             - NUNCA utilize formatação Markdown.
             - Sempre que o usuário der uma ordem que corresponda a uma de suas ferramentas (ex: "adicione 50 reais de gasolina", "agende um estudo", "peso de hoje é 80", "coloque no kanban para ler o artigo"), chame a função ANTES de responder.
@@ -220,9 +221,6 @@ export class GeminiLiveConnection {
     }
   }
 
-  // =========================================================================
-  // CORREÇÃO CRÍTICA: O formato foi atualizado para ToolResponse
-  // =========================================================================
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const msg = {
