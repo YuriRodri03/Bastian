@@ -118,6 +118,12 @@ export default function BarraComandoIA() {
 
       const aoReceberTextoDaIA = (textoBruto) => {
         const textoLimpo = limparMarkdown(textoBruto);
+        
+        // FILTRO MORDAÇA: Se o texto for um pensamento em inglês da IA, ignoramos a exibição.
+        if (textoLimpo.match(/^(Complying|Prioritizing|I've|I will|I am|Thinking|Understood|Processing)/i)) {
+          return;
+        }
+
         if (textoLimpo.length > 0) {
           exibirMensagem(textoLimpo);
           // Salva a resposta na nuvem
@@ -170,10 +176,11 @@ export default function BarraComandoIA() {
       setTimeout(() => {
         if (liveConnectionRef.current) {
           if (!hasGreetedRef.current) {
-            liveConnectionRef.current.enviarComandoSilencioso(`O sistema foi ativado. Diga APENAS "${saudacao}, senhor. Como posso ajudar?". NÃO FAÇA NENHUM RELATÓRIO SOBRE A MEMÓRIA a não ser que eu peça.`);
+            // Ordem direta e sem palavras negativas para não ativar o monólogo
+            liveConnectionRef.current.enviarComandoSilencioso(`Responda apenas com esta frase exata: "${saudacao}, senhor. Como posso ajudar?"`);
             hasGreetedRef.current = true;
           } else {
-            liveConnectionRef.current.enviarComandoSilencioso("O usuário ligou o microfone novamente. Diga apenas 'Pois não?' ou 'Ouvindo'.");
+            liveConnectionRef.current.enviarComandoSilencioso("Responda apenas com a frase: 'Pois não?'");
           }
         }
       }, 1000); 
