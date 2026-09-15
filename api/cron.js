@@ -9,7 +9,7 @@ const supabase = createClient(
 );
 
 webpush.setVapidDetails(
-  'mailto:seu-email@exemplo.com',
+  'mailto:seu-yurirodriguesp.lc10@gmail.com',
   process.env.VITE_VAPID_PUBLIC_KEY, 
   process.env.VAPID_PRIVATE_KEY
 );
