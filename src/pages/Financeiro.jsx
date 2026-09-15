@@ -113,7 +113,8 @@ const CustomTooltip = ({ active, payload }) => {
 };
 
 export default function Financeiro() {
-  const { transactions, addTransaction, removeTransaction, updateTransaction, toggleTransactionStatus, fetchTransactions } = useFinanceStore();
+  // AQUI FOI CORRIGIDO O NOME PARA 'deleteTransaction'
+  const { transactions, addTransaction, deleteTransaction, updateTransaction, toggleTransactionStatus, fetchTransactions } = useFinanceStore();
   
   const formRef = useRef(null);
 
@@ -229,9 +230,8 @@ export default function Financeiro() {
   // 3. CONSOLIDAÇÃO FINAL PARA OS CARDS DA TELA
   const displayReceitas = isProjected ? receitasPagas + aReceber : receitasPagas;
   const displayDespesas = isProjected ? despesasPagas + aPagar : despesasPagas;
-  const displayBalancoMensal = displayReceitas - displayDespesas; // Balanço EXCLUSIVO do mês selecionado
+  const displayBalancoMensal = displayReceitas - displayDespesas; 
 
-  // O Saldo Global agora só adiciona a projeção DAQUELE MÊS SELECIONADO (Não mistura com os próximos 5 anos)
   const displaySaldoGlobal = isProjected 
     ? saldoRealTotal + aReceber - aPagar 
     : saldoRealTotal;
@@ -240,12 +240,12 @@ export default function Financeiro() {
     ? investidoRealTotal + aportesPendentesMes - resgatesPendentesMes
     : investidoRealTotal;
 
-  // 4. DETALHAMENTO DA CARTEIRA PARA O GRÁFICO (Histórico pago + Pendências do mês se projetado)
+  // 4. DETALHAMENTO DA CARTEIRA PARA O GRÁFICO
   const carteiraInvestimentos = useMemo(() => {
     const ativos = {};
     transactions.forEach(t => {
       const isPaid = (t.status || 'pago') === 'pago';
-      const isPendingInFilter = !isPaid && filteredTransactions.some(ft => ft.id === t.id); // Só inclui se estiver no filtro atual
+      const isPendingInFilter = !isPaid && filteredTransactions.some(ft => ft.id === t.id); 
       
       const deveContar = isProjected ? (isPaid || isPendingInFilter) : isPaid;
 
@@ -449,7 +449,7 @@ export default function Financeiro() {
       {/* 5 Cards de Resumo */}
       <div className="w-full max-w-7xl grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-5 mb-6 sm:mb-8">
         
-        {/* CARD DE INVESTIMENTOS (Global com Projeção Inteligente) */}
+        {/* CARD DE INVESTIMENTOS */}
         <div className={`col-span-2 lg:col-span-1 bg-gradient-to-br from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition-all duration-300`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 text-emerald-200/80`}>
@@ -506,7 +506,7 @@ export default function Financeiro() {
           </div>
         </div>
 
-        {/* CARD MESTRE: SALDO GERAL (Resolve o problema da transição de meses) */}
+        {/* CARD MESTRE: SALDO GERAL */}
         <div className={`bg-gradient-to-br border rounded-2xl sm:rounded-3xl p-3 sm:p-6 backdrop-blur-xl shadow-lg relative overflow-hidden group transition-all duration-300 ${isProjected ? 'from-indigo-600/20 border-indigo-500/40 hover:border-indigo-500/60 shadow-indigo-500/10' : 'from-indigo-500/20 border-indigo-500/30 hover:border-indigo-500/40'}`}>
           <div className="flex justify-between items-center mb-3 sm:mb-6 relative z-10">
             <span className={`text-[10px] sm:text-sm font-bold tracking-wide uppercase truncate mr-2 ${isProjected ? 'text-white' : 'text-indigo-200/70'}`}>
@@ -832,7 +832,8 @@ export default function Financeiro() {
                         {isReceita ? '+' : '-'} R$ {t.amount.toFixed(2)}
                       </div>
                       
-                      <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                      {/* AQUI ESTAVA O SEGUNDO MISTÉRIO! Removi a regra do "hover" (lg:opacity-0 lg:group-hover:opacity-100). Agora os botões estão sempre visíveis para funcionar no touch do Tablet. */}
+                      <div className="flex items-center gap-1">
                         
                         {isFaturaCartao && (
                           <button 
@@ -861,8 +862,10 @@ export default function Financeiro() {
                         >
                           <Pencil size={16} />
                         </button>
+                        
+                        {/* AQUI ESTAVA O PRIMEIRO MISTÉRIO! Corrigido para deleteTransaction */}
                         <button 
-                          onClick={() => removeTransaction(t.id)}
+                          onClick={() => deleteTransaction(t.id)}
                           title="Excluir"
                           className="text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg hover:bg-rose-500/10 transition-all"
                         >

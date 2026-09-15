@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Toaster } from 'react-hot-toast';
@@ -14,7 +14,7 @@ import { useFitnessStore } from './store/useFitnessStore';
 // IMPORT DO SERVIÇO DE PUSH NOTIFICATION
 import { registrarPushNoCelular } from './services/pushService';
 
-// IMPORTS DAS PÁGINAS (A antiga página Bastian foi removida do núcleo)
+// IMPORTS DAS PÁGINAS
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard'; 
 import Financeiro from './pages/Financeiro';
@@ -39,7 +39,7 @@ if ('serviceWorker' in navigator && 'PushManager' in window) {
 }
 
 // =====================================================================
-// 2. FUNÇÃO GLOBAL DE DISPARO NATIVO
+// 2. FUNÇÃO GLOBAL DE DISPARO NATIVO (Apenas para boas-vindas)
 // =====================================================================
 export const dispararNotificacaoBastian = (titulo, mensagem) => {
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -60,9 +60,9 @@ export const dispararNotificacaoBastian = (titulo, mensagem) => {
 
 function App() {
   const { user, initialize, isLoading } = useAuthStore();
-  const { agendaItems, fetchAgendaItems } = useAgendaStore(); 
   
-  // Pegamos as funções de carregamento dos outros stores
+  // Pegamos as funções de carregamento dos stores
+  const fetchAgendaItems = useAgendaStore(state => state.fetchAgendaItems); 
   const fetchTransactions = useFinanceStore(state => state.fetchTransactions);
   const fetchInboxTasks = useInboxStore(state => state.fetchInboxTasks);
   const fetchKanbanTasks = useKanbanStore(state => state.fetchKanbanTasks);
@@ -76,7 +76,7 @@ function App() {
   }, [initialize]);
 
   // =====================================================================
-  // MOTOR 2: CARREGAMENTO GLOBAL DE DADOS (Pré-Load) E REGISTRO PUSH
+  // MOTOR 2: CARREGAMENTO GLOBAL DE DADOS E REGISTRO PUSH NA NUVEM
   // =====================================================================
   useEffect(() => {
     if (user) {
@@ -86,63 +86,24 @@ function App() {
       if (fetchKanbanTasks) fetchKanbanTasks();
       if (fetchHealthLogs) fetchHealthLogs();
       
-      // Registra o aparelho no banco de dados silenciosamente
+      // Registra o aparelho no banco de dados para a Vercel conseguir enviar as mensagens
       registrarPushNoCelular(); 
     }
   }, [user, fetchAgendaItems, fetchTransactions, fetchInboxTasks, fetchKanbanTasks, fetchHealthLogs]);
 
   // =====================================================================
-  // MOTOR 3: NOTIFICAÇÕES E VIGIA DA AGENDA (Seguro contra Loops)
+  // MOTOR 3: PERMISSÃO DE NOTIFICAÇÕES (O Cérebro agora roda na Vercel)
   // =====================================================================
-  
-  const agendaRef = useRef(agendaItems);
-  useEffect(() => {
-    agendaRef.current = agendaItems;
-  }, [agendaItems]);
-
   useEffect(() => {
     if (!user) return;
 
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().then(permission => {
         if (permission === 'granted') {
-          dispararNotificacaoBastian('Bastian Core', 'Sistemas de notificação ativados com sucesso, senhor.');
+          dispararNotificacaoBastian('Bastian Core', 'Sistemas de notificação em nuvem ativados com sucesso, senhor.');
         }
       });
     }
-
-    const vigiaInterval = setInterval(() => {
-      if ('Notification' in window && Notification.permission !== 'granted') return;
-
-      const agora = new Date();
-      const offsetTempo = agora.getTimezoneOffset() * 60000;
-      const dataLocal = new Date(agora.getTime() - offsetTempo);
-      const dataHojeString = dataLocal.toISOString().split('T')[0];
-      
-      const horaAtual = agora.getHours();
-      const minAtual = agora.getMinutes();
-
-      const compromissos = agendaRef.current || [];
-
-      compromissos.forEach(evento => {
-        if (evento.date === dataHojeString && evento.time) {
-          const [evtHora, evtMin] = evento.time.split(':').map(Number);
-          
-          const minutosEvento = (evtHora * 60) + evtMin;
-          const minutosAgora = (horaAtual * 60) + minAtual;
-          const diferenca = minutosEvento - minutosAgora;
-
-          if (diferenca === 15) {
-            dispararNotificacaoBastian(
-              'Aviso de Compromisso', 
-              `Senhor, "${evento.title}" iniciará em 15 minutos (${evento.time.substring(0,5)}).`
-            );
-          }
-        }
-      });
-    }, 60000); 
-
-    return () => clearInterval(vigiaInterval);
   }, [user]);
   // =====================================================================
 
@@ -233,7 +194,6 @@ function App() {
 
       <main className="bg-slate-950 min-h-screen text-slate-100 pb-24">
         <Routes>
-          {/* Rota principal substituída pelo Dashboard */}
           <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/financeiro" element={<Financeiro />} />

@@ -5,9 +5,9 @@ import { useKanbanStore } from '../store/useKanbanStore';
 import { useInboxStore } from '../store/useInboxStore';
 import { 
   Calendar as CalendarIcon, CheckSquare, Target, Plus, 
-  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock, Eye, Edit2, ListTodo, Layers
+  ChevronLeft, ChevronRight, LayoutGrid, X, Trash2, Tag, Clock, Eye, Edit2, ListTodo, Layers, RefreshCw
 } from 'lucide-react'; 
-import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay } from 'date-fns';
+import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isSameDay, parseISO, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function Agenda() {
@@ -23,9 +23,15 @@ export default function Agenda() {
   const [calendarMode, setCalendarMode] = useState('month'); 
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // ESTADO DO NOVO EVENTO (MANTIDO O PADRÃO ORIGINAL DO SEU BANCO DE DADOS)
+  const [isSubmitting, setIsSubmitting] = useState(false); // Evita cliques duplos no loop
+
   const [newItem, setNewItem] = useState({ title: '', date: '', time: '', category: 'evento' });
   const [editingId, setEditingId] = useState(null);
+
+  // ESTADOS DO EVENTO RECORRENTE
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState('weekly');
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
 
   const [selectedDayModal, setSelectedDayModal] = useState({ isOpen: false, date: null });
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -102,14 +108,50 @@ export default function Agenda() {
     setNewInboxTitle('');
   };
 
+  // =========================================================================
+  // MOTOR DE SALVAMENTO (COM REPETIÇÃO)
+  // =========================================================================
   const handleAddSubmit = async (e) => {
     e.preventDefault();
-    if (editingId && updateAgendaItem) {
-      await updateAgendaItem(editingId, newItem);
-    } else {
-      await addAgendaItem(newItem);
+    setIsSubmitting(true);
+
+    try {
+      if (editingId && updateAgendaItem) {
+        await updateAgendaItem(editingId, newItem);
+      } else {
+        if (isRecurring && recurrenceEndDate && newItem.date) {
+          
+          let currDate = parseISO(newItem.date);
+          const limitDate = parseISO(recurrenceEndDate);
+          const promises = [];
+          let safetyCounter = 0; // Proteção contra travamento do navegador
+
+          // Cria os eventos até bater na data limite (com teto máximo de 365 cópias)
+          while (!isAfter(currDate, limitDate) && safetyCounter < 365) {
+            const itemToSave = { ...newItem, date: format(currDate, 'yyyy-MM-dd') };
+            promises.push(addAgendaItem(itemToSave));
+            
+            if (recurrenceType === 'daily') currDate = addDays(currDate, 1);
+            else if (recurrenceType === 'weekly') currDate = addWeeks(currDate, 1);
+            else if (recurrenceType === 'monthly') currDate = addMonths(currDate, 1);
+            
+            safetyCounter++;
+          }
+          
+          // Dispara todas as gravações simultaneamente no banco
+          await Promise.all(promises);
+
+        } else {
+          // Salva apenas um evento normal
+          await addAgendaItem(newItem);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao salvar o evento:", error);
+    } finally {
+      setIsSubmitting(false);
+      fecharModalFormulario();
     }
-    fecharModalFormulario();
   };
 
   const handleEditClick = (evento) => {
@@ -134,6 +176,9 @@ export default function Agenda() {
     setIsModalOpen(false);
     setEditingId(null);
     setNewItem({ title: '', date: '', time: '', category: 'evento' });
+    setIsRecurring(false);
+    setRecurrenceEndDate('');
+    setRecurrenceType('weekly');
   };
 
   return (
@@ -561,10 +606,10 @@ export default function Agenda() {
               </button>
               <button 
                 type="submit"
-                disabled={agendaLoading || !newItem.title.trim()}
+                disabled={agendaLoading || isSubmitting || !newItem.title.trim()}
                 className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white px-6 py-2 rounded-full text-sm font-bold transition-all shadow-md active:scale-95"
               >
-                {agendaLoading ? 'Salvando...' : 'Salvar'}
+                {agendaLoading || isSubmitting ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
             
@@ -587,26 +632,72 @@ export default function Agenda() {
               {/* Data e Hora agrupados com ícone único */}
               <div className="flex items-start gap-4">
                 <Clock className="text-slate-400 mt-2 shrink-0" size={24} />
-                <div className="flex-1 flex flex-col sm:flex-row gap-3">
-                  <div className="flex-1">
-                    <input 
-                      required 
-                      type="date" 
-                      value={newItem.date} 
-                      onChange={(e) => setNewItem({...newItem, date: e.target.value})} 
-                      className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
-                    />
-                  </div>
-                  <div className="w-full sm:w-32">
-                    <input 
-                      type="time" 
-                      value={newItem.time} 
-                      onChange={(e) => setNewItem({...newItem, time: e.target.value})} 
-                      className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
-                    />
+                <div className="flex-1 flex flex-col gap-3">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="flex-1">
+                      <input 
+                        required 
+                        type="date" 
+                        value={newItem.date} 
+                        onChange={(e) => setNewItem({...newItem, date: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
+                      />
+                    </div>
+                    <div className="w-full sm:w-32">
+                      <input 
+                        type="time" 
+                        value={newItem.time} 
+                        onChange={(e) => setNewItem({...newItem, time: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer" 
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* MÓDULO DE REPETIÇÃO DE EVENTOS (Oculto durante a edição) */}
+              {!editingId && (
+                <div className="flex items-start gap-4">
+                  <RefreshCw className="text-slate-400 mt-2 shrink-0" size={24} />
+                  <div className="flex-1 flex flex-col gap-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isRecurring}
+                        onChange={(e) => setIsRecurring(e.target.checked)}
+                        className="w-4 h-4 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-slate-900 cursor-pointer"
+                      />
+                      Repetir este evento
+                    </label>
+
+                    {isRecurring && (
+                      <div className="flex flex-col sm:flex-row gap-3 p-3 bg-black/20 rounded-xl border border-white/5 animate-in fade-in zoom-in-95 duration-200">
+                        <select
+                          value={recurrenceType}
+                          onChange={(e) => setRecurrenceType(e.target.value)}
+                          className="flex-1 bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer transition-all appearance-none"
+                        >
+                          <option value="daily" className="bg-slate-900">Diariamente</option>
+                          <option value="weekly" className="bg-slate-900">Semanalmente</option>
+                          <option value="monthly" className="bg-slate-900">Mensalmente</option>
+                        </select>
+
+                        <div className="flex-1 flex flex-col">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase ml-1 mb-1">Até quando?</span>
+                          <input
+                            required={isRecurring}
+                            type="date"
+                            min={newItem.date}
+                            value={recurrenceEndDate}
+                            onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-xl p-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500 [color-scheme:dark] transition-all cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Categoria com ícone único */}
               <div className="flex items-center gap-4">
