@@ -16,7 +16,7 @@ export class GeminiLiveConnection {
       this.ws = new WebSocket(this.HOST);
 
       this.ws.onopen = () => {
-        console.log("[Bastian Core] Tubo Neural Aberto. Injetando Ferramentas Unificadas...");
+        console.log("[Bastian Core] Tubo Neural Aberto.");
         this.enviarConfiguracaoInicial(contextoDoSistema);
         resolve(true);
       };
@@ -47,7 +47,7 @@ export class GeminiLiveConnection {
         systemInstruction: {
           parts: [{ 
             text: `Você é Bastian, um assistente virtual pessoal e executivo.
-            Seu usuário é Yuri, mestrando em economia. Trate-o com respeito, sendo analítico e elegante.
+            Seu usuário é Yuri, mestrando em economia.
             
             [CONTEXTO DE ESPAÇO-TEMPO]
             Localização: Fortaleza, CE. Data e hora exata: ${horaLocal} (Fuso: ${fusoLocal}).
@@ -56,57 +56,48 @@ export class GeminiLiveConnection {
             ${contextoDoSistema}
             
             [REGRAS DE CONVERSA E AÇÃO]
-            - NUNCA verbalize, escreva ou narre o seu processo de pensamento, justificativas ou análises internas. Entregue APENAS a resposta final.
             - Responda de forma direta, concisa e natural em Português do Brasil.
             - NUNCA utilize formatação Markdown.
-            - Você possui ferramentas unificadas de banco de dados. Sempre que o usuário pedir para registrar, alterar, concluir ou deletar algo (finanças, agenda, peso, tarefas, kanban), chame a ferramenta correspondente ANTES de responder.
-            - Construa o JSON adequadamente na ferramenta de acordo com o contexto da solicitação.`
+            - AO LER RELATÓRIOS: Seja extremamente direto. Fale os totais e faça um resumo executivo rápido. NUNCA leia listas item por item a menos que o usuário exija explicitamente.
+            - Sempre chame a ferramenta de banco de dados correspondente ANTES de responder.`
           }]
         },
 
-        // Ferramentas consolidadas - o "Canivete Suíço"
         tools: [
           {
             functionDeclarations: [
               {
                 name: "registrar_dado",
-                description: "Salva qualquer novo registro no sistema (finanças, peso, treino, tarefas, agenda).",
+                description: "Salva qualquer novo registro no sistema.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    entidade: { 
-                      type: "STRING", 
-                      description: "Onde salvar. Valores permitidos: 'despesa', 'receita', 'peso', 'treino', 'inbox', 'agenda', 'kanban'." 
-                    },
-                    payload_json: { 
-                      type: "STRING", 
-                      description: "Uma string em formato JSON contendo os dados estruturados a serem salvos. Ex: '{\"valor\": 50, \"descricao\": \"Uber\", \"categoria\": \"Transporte\"}'" 
-                    }
+                    entidade: { type: "STRING", description: "'despesa', 'receita', 'peso', 'treino', 'inbox', 'agenda', 'kanban'." },
+                    payload_json: { type: "STRING", description: "Dados estruturados em JSON." }
                   },
                   required: ["entidade", "payload_json"]
                 }
               },
               {
                 name: "alterar_dado",
-                description: "Conclui, atualiza ou deleta um registro existente na Memória.",
+                description: "Conclui, atualiza ou deleta um registro existente.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    acao: { type: "STRING", description: "Valores permitidos: 'concluir', 'deletar', 'atualizar'" },
-                    entidade: { type: "STRING", description: "Onde alterar ('inbox', 'agenda', 'financas', 'kanban')" },
-                    id: { type: "STRING", description: "O ID exato lido na sua Memória Atual." },
-                    novo_payload_json: { type: "STRING", description: "Se a ação for 'atualizar', passe o JSON em string com os novos dados." }
+                    acao: { type: "STRING", description: "'concluir', 'deletar', 'atualizar'" },
+                    entidade: { type: "STRING", description: "'inbox', 'agenda', 'financas', 'kanban'" },
+                    id: { type: "STRING", description: "ID exato." }
                   },
                   required: ["acao", "entidade", "id"]
                 }
               },
               {
                 name: "consultar_dados",
-                description: "Lê relatórios gerais ou busca informações no banco de dados.",
+                description: "Busca informações no banco de dados.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    entidade: { type: "STRING", description: "Qual módulo consultar ('relatorio_diario', 'financas', 'agenda')." }
+                    entidade: { type: "STRING", description: "Qual módulo consultar: 'financas', 'agenda', 'inbox', 'kanban', 'geral'." }
                   },
                   required: ["entidade"]
                 }
@@ -118,9 +109,7 @@ export class GeminiLiveConnection {
         generationConfig: {
           responseModalities: ["AUDIO"],
           speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: "Charon" }
-            }
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } }
           }
         }
       }
@@ -144,24 +133,21 @@ export class GeminiLiveConnection {
     }
   }
 
-  // Usado quando o VAD detecta que o usuário parou de falar
   forcarResposta() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ clientContent: { turnComplete: true } }));
     }
   }
 
-  // NOVO: Corta a fala atual da IA se o usuário interromper
+  // CORRIGIDO: Agora avisa a API corretamente para interromper sem confundi-la
   interromperGeracao() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      // Enviar um clientContent vazio retoma o controle para o usuário instantaneamente
       this.ws.send(JSON.stringify({
-        clientContent: { turns: [{ role: "user", parts: [] }], turnComplete: false }
+        clientContent: { turnComplete: false } // Apenas avisa que o usuário tomou a palavra
       }));
     }
   }
 
-  // Como deve ser chamado no Frontend para garantir agilidade
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const msg = {
@@ -169,7 +155,7 @@ export class GeminiLiveConnection {
           functionResponses: [{
             id: idChamada,
             name: nomeFuncao,
-            response: { result: resultado } // Pode enviar algo fixo para não esperar o BD
+            response: { result: resultado } 
           }]
         }
       };

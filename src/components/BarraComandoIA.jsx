@@ -195,10 +195,29 @@ export default function BarraComandoIA() {
           } 
           
           else if (name === "consultar_dados") {
-             // Se for consulta, precisamos gerar o relatório real e mandar de volta AGORA (não otimista)
-             const relatorioAtual = gerarContextoDinâmico();
-             exibirMensagem(`📊 Lendo banco de dados...`);
-             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, relatorioAtual);
+             let dadosParaIA = "";
+             
+             // Envia apenas o que foi solicitado, reduzindo drasticamente o tempo de raciocínio da IA
+             if (args.entidade === 'financas') {
+                const transacoes = useFinanceStore.getState().transactions;
+                const saldo = useFinanceStore.getState().balance;
+                dadosParaIA = JSON.stringify({ saldo_atual: saldo, historico_transacoes: transacoes });
+             } 
+             else if (args.entidade === 'agenda') {
+                dadosParaIA = JSON.stringify(useAgendaStore.getState().agendaItems);
+             }
+             else if (args.entidade === 'inbox') {
+                dadosParaIA = JSON.stringify(useInboxStore.getState().inboxTasks);
+             }
+             else if (args.entidade === 'kanban') {
+                dadosParaIA = JSON.stringify(useKanbanStore.getState().tasks);
+             }
+             else {
+                dadosParaIA = gerarContextoDinâmico(); // Se ele pedir algo geral, manda tudo
+             }
+
+             exibirMensagem(`📊 Lendo banco de dados (${args.entidade})...`);
+             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, dadosParaIA);
           }
 
         } catch (erro) {
