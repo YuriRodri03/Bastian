@@ -12,13 +12,17 @@ export class GerenciadorDeAudio {
     this.isTalking = false;
     this.silenceTimer = null;
     
-    // NOVO: Guarda os nós de áudio que estão tocando para podermos pará-los
     this.activeSources = []; 
+    this.framesDeRuido = 0; // NOVO: Filtro contra falsos positivos
   }
 
-  // NOVO: Adicionado onStartTalking
   async inicializar(onPcmData, onSilenceDetected, onStartTalking) {
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    
+    // NOVO (Trava 1): Força o navegador a desbloquear a saída de áudio
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
 
     const codigoDoProcessador = `
       class PcmProcessor extends AudioWorkletProcessor {
@@ -51,7 +55,7 @@ export class GerenciadorDeAudio {
     this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
     
     // =====================================================================
-    // O DETECTOR DE VOZ (VAD) - Agora sempre ativo
+    // DETECTOR DE VOZ (VAD) COM ANTIRRUÍDO
     // =====================================================================
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = 512;
@@ -69,28 +73,35 @@ export class GerenciadorDeAudio {
       for (let i = 0; i < dataArray.length; i++) soma += dataArray[i];
       let volumeMedio = soma / dataArray.length;
       
-      // Se a IA estiver falando pelas caixas de som, podemos aumentar ligeiramente o limite
-      // para evitar que o microfone confunda a voz dela com a sua, apesar do echoCancellation.
-      const limiteDinamico = this.isPlaying() ? 20 : 15;
+      const isPlaying = this.isPlaying();
+      
+      // NOVO (Trava 2): Se a IA estiver falando, o volume precisa ser muito mais alto (45) para cortá-la
+      const limiteDinamico = isPlaying ? 45 : 15;
 
       if (volumeMedio > limiteDinamico) { 
-        // 1. O usuário está falando
-        if (this.silenceTimer) {
-          clearTimeout(this.silenceTimer);
-          this.silenceTimer = null;
-        }
+        this.framesDeRuido++;
         
-        if (!this.isTalking) {
-          this.isTalking = true;
-          // Dispara o evento de interrupção instantaneamente
-          if (onStartTalking) onStartTalking();
+        // NOVO (Trava 3): Exige 5 frames (fração de seg) para interromper a IA, para ignorar estalos e ecos
+        const framesNecessarios = isPlaying ? 5 : 1;
+
+        if (this.framesDeRuido >= framesNecessarios) {
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+            this.silenceTimer = null;
+          }
+          
+          if (!this.isTalking) {
+            this.isTalking = true;
+            if (onStartTalking) onStartTalking();
+          }
         }
       } else { 
-        // 2. O usuário parou de falar
+        this.framesDeRuido = 0; // Zera o contador de ruído se ficou silêncio
+        
         if (this.isTalking && !this.silenceTimer) {
           this.silenceTimer = setTimeout(() => {
             this.isTalking = false;
-            if (onSilenceDetected) onSilenceDetected(); // Muda para processando/enviando
+            if (onSilenceDetected) onSilenceDetected(); 
           }, 800); 
         }
       }
@@ -145,34 +156,29 @@ export class GerenciadorDeAudio {
     reprodutor.start(this.nextPlayTime);
     this.nextPlayTime += audioBuffer.duration;
 
-    // NOVO: Adiciona o reprodutor à lista de ativos e remove quando terminar
     this.activeSources.push(reprodutor);
     reprodutor.onended = () => {
       this.activeSources = this.activeSources.filter(src => src !== reprodutor);
     };
   }
 
-  // NOVO: Verifica se o áudio está tocando neste exato momento
   isPlaying() {
     return this.audioContext && (this.audioContext.currentTime < this.nextPlayTime);
   }
 
-  // NOVO: Corta abruptamente qualquer áudio que a IA esteja falando
   pararAudioAtual() {
     if (!this.audioContext) return;
     
-    // Para todos os nós de áudio em execução
     this.activeSources.forEach(source => {
       try { source.stop(); } catch (e) {}
     });
     this.activeSources = [];
     
-    // Zera o tempo da fila para o momento exato de agora
     this.nextPlayTime = this.audioContext.currentTime;
   }
 
   parar() {
-    this.pararAudioAtual(); // Aproveita a nova função aqui também
+    this.pararAudioAtual(); 
     if (this.stream) this.stream.getTracks().forEach(track => track.stop());
     if (this.workletNode) this.workletNode.disconnect();
     if (this.analyser) this.analyser.disconnect();
@@ -180,6 +186,7 @@ export class GerenciadorDeAudio {
     
     this.analyser = null;
     this.nextPlayTime = 0;
+    this.framesDeRuido = 0;
     if (this.silenceTimer) clearTimeout(this.silenceTimer);
   }
 }
