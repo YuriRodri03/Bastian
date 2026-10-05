@@ -10,7 +10,7 @@ import { useAgendaStore } from '../store/useAgendaStore';
 import { useInboxStore } from '../store/useInboxStore';
 import { useKanbanStore } from '../store/useKanbanStore';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { useChatStore } from '../store/useChatStore'; // O hipocampo na nuvem
+import { useChatStore } from '../store/useChatStore'; 
 
 export default function BarraComandoIA() {
   const [aiState, setAiState] = useState('idle'); 
@@ -24,7 +24,6 @@ export default function BarraComandoIA() {
 
   const hasGreetedRef = useRef(false); 
 
-  // Puxa a memória da nuvem assim que o componente carrega
   useEffect(() => {
     useChatStore.getState().fetchMemoria();
   }, []);
@@ -45,7 +44,6 @@ export default function BarraComandoIA() {
     const kanban = useKanbanStore.getState().tasks.map(t => ({ id: t.id, titulo: t.title, status: t.status }));
     const historicoSaude = useFitnessStore.getState().healthLogs.map(l => ({ categoria: l.type, registro: l.name, valor: l.value, unidade: l.unit, data: l.date }));
     
-    // Puxa as conversas da nuvem (Sincroniza PC e Celular)
     const memoriasNuvem = useChatStore.getState().mensagensRecentes;
     const historicoRecente = memoriasNuvem.length > 0 
       ? memoriasNuvem.map((msg, idx) => `[Memória ${idx + 1}]: Você disse: "${msg}"`).join(' | ')
@@ -64,16 +62,14 @@ export default function BarraComandoIA() {
       - Kanban: ${JSON.stringify(kanban)}
       - Saúde: ${JSON.stringify(historicoSaude)}
 
-      Memória de Curto Prazo em Nuvem (O que você falou por último com o usuário):
+      Memória de Curto Prazo em Nuvem:
       ${historicoRecente}
 
       REGRAS CRÍTICAS DE COMPORTAMENTO:
-      1. NUNCA FAÇA UM RELATÓRIO A NÃO SER QUE O USUÁRIO PEÇA EXPLICITAMENTE (ex: "Qual meu relatório de hoje?").
-      2. NÃO REPITA INFORMAÇÕES que já estão na sua Memória de Curto Prazo em Nuvem.
-      3. OBRIGAÇÃO DE USAR FERRAMENTAS: Se o usuário pedir para agendar, criar, registrar ou APAGAR algo, VOCÊ DEVE OBRIGATORIAMENTE usar a respectiva "Function/Tool". 
-      4. PARA MODIFICAR/EDITAR ALGO: Acione a ferramenta 'deletar_registro' enviando o ID antigo e, em seguida, acione a ferramenta de adicionar.
-      5. FORMATO DE DATA: ESTRITAMENTE YYYY-MM-DD.
-      6. NUNCA minta dizendo que fez algo sem ter executado a função.
+      1. NUNCA FAÇA UM RELATÓRIO A NÃO SER QUE O USUÁRIO PEÇA EXPLICITAMENTE.
+      2. OBRIGAÇÃO DE USAR FERRAMENTAS: Use 'registrar_dado', 'alterar_dado' ou 'consultar_dados' ANTES de responder.
+      3. FORMATO DE DATA: ESTRITAMENTE YYYY-MM-DD.
+      4. Respostas curtas. Haja como um executivo auxiliando o usuário (Yuri).
     `;
   };
 
@@ -83,7 +79,6 @@ export default function BarraComandoIA() {
     mensagemTimeoutRef.current = setTimeout(() => setUltimaMensagem(null), 8000);
   };
 
-  // Avalia matematicamente a saudação correta
   const obterSaudacaoTemporal = () => {
     const hora = new Date().getHours();
     if (hora >= 5 && hora < 12) return "Bom dia";
@@ -109,6 +104,17 @@ export default function BarraComandoIA() {
         }
       };
 
+      // NOVO: A INTERRUPÇÃO ATIVA J.A.R.V.I.S.
+      const aoComecarFalar = () => {
+        if (audioManagerRef.current && audioManagerRef.current.isPlaying()) {
+          audioManagerRef.current.pararAudioAtual(); // Cala a caixa de som imediatamente
+          if (liveConnectionRef.current) {
+            liveConnectionRef.current.interromperGeracao(); // Avisa o Gemini para parar de gerar
+          }
+        }
+        setAiState('listening');
+      };
+
       const aoReceberAudioDaIA = (base64Audio) => {
         setAiState('speaking'); 
         if (audioManagerRef.current) audioManagerRef.current.tocarAudio(base64Audio);
@@ -118,65 +124,99 @@ export default function BarraComandoIA() {
 
       const aoReceberTextoDaIA = (textoBruto) => {
         const textoLimpo = limparMarkdown(textoBruto);
-        
-        // FILTRO MORDAÇA: Se o texto for um pensamento em inglês da IA, ignoramos a exibição.
-        if (textoLimpo.match(/^(Complying|Prioritizing|I've|I will|I am|Thinking|Understood|Processing)/i)) {
-          return;
-        }
+        if (textoLimpo.match(/^(Complying|Prioritizing|I've|I will|I am|Thinking|Understood|Processing)/i)) return;
 
         if (textoLimpo.length > 0) {
           exibirMensagem(textoLimpo);
-          // Salva a resposta na nuvem
           useChatStore.getState().adicionarMemoria(textoLimpo);
         }
       };
 
+      // NOVO: ROTEADOR DE FUNÇÕES UNIFICADAS COM RESPOSTA OTIMISTA
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
         setAiState('processing'); 
         const { id, name, args } = functionCallInfo;
-        let resultadoDaOperacao = "";
         const dataHoje = new Date().toISOString().split('T')[0];
 
-        try {
-          switch (name) {
-            case "adicionar_despesa": await useFinanceStore.getState().addTransaction({ amount: Number(args.valor), description: args.descricao, type: 'despesa', category: args.categoria || 'Outros', date: dataHoje, status: 'pago' }); resultadoDaOperacao = "Despesa salva."; exibirMensagem(`💸 Gasto Salvo: ${args.descricao}`); break;
-            case "adicionar_receita": await useFinanceStore.getState().addTransaction({ amount: Number(args.valor), description: args.descricao, type: 'receita', category: args.categoria || 'Outros', date: dataHoje, status: 'pago' }); resultadoDaOperacao = "Receita salva."; exibirMensagem(`📈 Receita Adicionada: ${args.descricao}`); break;
-            case "adicionar_agenda": await useAgendaStore.getState().addAgendaItem({ title: args.titulo, date: args.data, time: args.hora || null }); resultadoDaOperacao = "Evento agendado."; exibirMensagem(`📅 Agendado: ${args.titulo}`); break;
-            case "registrar_peso": await useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', Number(args.peso), 'kg'); resultadoDaOperacao = "Peso gravado."; exibirMensagem(`⚖️ Peso Gravado: ${args.peso} kg`); break;
-            case "adicionar_treino": await useFitnessStore.getState().addHealthLog('treino', args.modalidade, Number(args.duracao), 'min'); resultadoDaOperacao = "Treino salvo."; exibirMensagem(`🏋️ Treino Registrado: ${args.modalidade}`); break;
-            case "adicionar_tarefa_inbox": await useInboxStore.getState().addInboxTask(args.titulo, args.data || dataHoje); resultadoDaOperacao = "Tarefa salva."; exibirMensagem(`📥 Inbox: ${args.titulo}`); break;
-            case "adicionar_kanban": await useKanbanStore.getState().addTask(args.titulo, args.status || 'backlog'); resultadoDaOperacao = "Cartão Kanban criado."; exibirMensagem(`📋 Kanban: ${args.titulo}`); break;
-            case "concluir_tarefa": if (args.origem === 'inbox') { await useInboxStore.getState().toggleInboxTask(args.id, false); resultadoDaOperacao = "Tarefa concluída."; exibirMensagem(`✅ Tarefa Concluída!`); } else if (args.origem === 'agenda') { await useAgendaStore.getState().toggleItemCompletion(args.id, false); resultadoDaOperacao = "Evento concluído."; exibirMensagem(`✅ Compromisso Concluído!`); } break;
-            case "relatorio_diario": resultadoDaOperacao = gerarContextoDinâmico(); exibirMensagem(`📊 Consultando Bancos de Dados...`); break;
-            case "deletar_registro":
-              if (args.modulo === 'financeiro') await useFinanceStore.getState().deleteTransaction(args.id);
-              else if (args.modulo === 'agenda') await useAgendaStore.getState().deleteAgendaItem(args.id);
-              else if (args.modulo === 'inbox') await useInboxStore.getState().deleteInboxTask(args.id);
-              else if (args.modulo === 'kanban') await useKanbanStore.getState().deleteTask(args.id);
-              resultadoDaOperacao = "Registro removido do banco de dados.";
-              exibirMensagem(`🗑️ Registro apagado.`);
-              break;
-            default: resultadoDaOperacao = "Comando desconhecido.";
-          }
-        } catch (erro) {
-          console.error(erro);
-          resultadoDaOperacao = "Erro interno ao executar a função.";
+        // 1. SE FOR GRAVAÇÃO, RESPONDE INSTANTANEAMENTE PARA O BASTIAN NÃO TRAVAR
+        if (name === "registrar_dado" || name === "alterar_dado") {
+           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, "{\"status\": \"sucesso\", \"detalhe\": \"Executando no banco local.\"}");
         }
 
-        if (liveConnectionRef.current) liveConnectionRef.current.enviarRespostaDeFuncao(id, name, resultadoDaOperacao);
+        // 2. EXECUÇÃO EM BACKGROUND
+        try {
+          if (name === "registrar_dado") {
+            const dados = JSON.parse(args.payload_json);
+            
+            switch (args.entidade) {
+              case 'despesa':
+                useFinanceStore.getState().addTransaction({ amount: Number(dados.valor), description: dados.descricao, type: 'despesa', category: dados.categoria || 'Outros', date: dataHoje, status: 'pago' });
+                exibirMensagem(`💸 Despesa: ${dados.descricao}`);
+                break;
+              case 'receita':
+                useFinanceStore.getState().addTransaction({ amount: Number(dados.valor), description: dados.descricao, type: 'receita', category: dados.categoria || 'Outros', date: dataHoje, status: 'pago' });
+                exibirMensagem(`📈 Receita: ${dados.descricao}`);
+                break;
+              case 'peso':
+                useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', Number(dados.peso), 'kg');
+                exibirMensagem(`⚖️ Peso: ${dados.peso} kg`);
+                break;
+              case 'treino':
+                useFitnessStore.getState().addHealthLog('treino', dados.modalidade, Number(dados.duracao), 'min');
+                exibirMensagem(`🏋️ Treino: ${dados.modalidade}`);
+                break;
+              case 'inbox':
+                useInboxStore.getState().addInboxTask(dados.titulo, dados.data || dataHoje);
+                exibirMensagem(`📥 Inbox: ${dados.titulo}`);
+                break;
+              case 'agenda':
+                useAgendaStore.getState().addAgendaItem({ title: dados.titulo, date: dados.data, time: dados.hora || null });
+                exibirMensagem(`📅 Agenda: ${dados.titulo}`);
+                break;
+              case 'kanban':
+                useKanbanStore.getState().addTask(dados.titulo, dados.status || 'backlog');
+                exibirMensagem(`📋 Kanban: ${dados.titulo}`);
+                break;
+            }
+          } 
+          
+          else if (name === "alterar_dado") {
+            if (args.acao === 'concluir') {
+              if (args.entidade === 'inbox') useInboxStore.getState().toggleInboxTask(args.id, false);
+              if (args.entidade === 'agenda') useAgendaStore.getState().toggleItemCompletion(args.id, false);
+              exibirMensagem(`✅ Item concluído`);
+            } else if (args.acao === 'deletar') {
+              if (args.entidade === 'financas') useFinanceStore.getState().deleteTransaction(args.id);
+              if (args.entidade === 'agenda') useAgendaStore.getState().deleteAgendaItem(args.id);
+              if (args.entidade === 'inbox') useInboxStore.getState().deleteInboxTask(args.id);
+              if (args.entidade === 'kanban') useKanbanStore.getState().deleteTask(args.id);
+              exibirMensagem(`🗑️ Registro apagado.`);
+            }
+          } 
+          
+          else if (name === "consultar_dados") {
+             // Se for consulta, precisamos gerar o relatório real e mandar de volta AGORA (não otimista)
+             const relatorioAtual = gerarContextoDinâmico();
+             exibirMensagem(`📊 Lendo banco de dados...`);
+             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, relatorioAtual);
+          }
+
+        } catch (erro) {
+          console.error("Erro ao processar ferramenta de fundo:", erro);
+        }
       };
 
       liveConnectionRef.current = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA, aoReceberChamadaDeFuncao);
       await liveConnectionRef.current.conectar(gerarContextoDinâmico());
-      await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio); 
+      
+      // Passando o NOVO parâmetro aoComecarFalar
+      await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio, aoComecarFalar); 
 
-      // Lógica de Saudação Limpa e Inteligente
       const saudacao = obterSaudacaoTemporal();
 
       setTimeout(() => {
         if (liveConnectionRef.current) {
           if (!hasGreetedRef.current) {
-            // Ordem direta e sem palavras negativas para não ativar o monólogo
             liveConnectionRef.current.enviarComandoSilencioso(`Responda apenas com esta frase exata: "${saudacao}, senhor. Como posso ajudar?"`);
             hasGreetedRef.current = true;
           } else {

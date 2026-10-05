@@ -16,7 +16,7 @@ export class GeminiLiveConnection {
       this.ws = new WebSocket(this.HOST);
 
       this.ws.onopen = () => {
-        console.log("[Bastian Core] Tubo Neural Aberto. Injetando Ferramentas...");
+        console.log("[Bastian Core] Tubo Neural Aberto. Injetando Ferramentas Unificadas...");
         this.enviarConfiguracaoInicial(contextoDoSistema);
         resolve(true);
       };
@@ -59,127 +59,56 @@ export class GeminiLiveConnection {
             - NUNCA verbalize, escreva ou narre o seu processo de pensamento, justificativas ou análises internas. Entregue APENAS a resposta final.
             - Responda de forma direta, concisa e natural em Português do Brasil.
             - NUNCA utilize formatação Markdown.
-            - Sempre que o usuário der uma ordem que corresponda a uma de suas ferramentas (ex: "adicione 50 reais de gasolina", "agende um estudo", "peso de hoje é 80", "coloque no kanban para ler o artigo"), chame a função ANTES de responder.
-            - Para concluir uma tarefa ou compromisso, olhe o ID correspondente na sua Memória Atual e use a ferramenta 'concluir_tarefa'.
-            - Para excluir algo ou editar, use 'deletar_registro' (e no caso de edição, recrie com os dados novos em seguida).`
+            - Você possui ferramentas unificadas de banco de dados. Sempre que o usuário pedir para registrar, alterar, concluir ou deletar algo (finanças, agenda, peso, tarefas, kanban), chame a ferramenta correspondente ANTES de responder.
+            - Construa o JSON adequadamente na ferramenta de acordo com o contexto da solicitação.`
           }]
         },
 
+        // Ferramentas consolidadas - o "Canivete Suíço"
         tools: [
           {
             functionDeclarations: [
               {
-                name: "relatorio_diario",
-                description: "Lê a memória de curto prazo (Agenda, Finanças, Tarefas) para informar o usuário sobre o dia."
-              },
-              {
-                name: "adicionar_despesa",
-                description: "Registra uma despesa ou gasto no sistema financeiro.",
+                name: "registrar_dado",
+                description: "Salva qualquer novo registro no sistema (finanças, peso, treino, tarefas, agenda).",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    valor: { type: "NUMBER", description: "O valor numérico (ex: 50.00)." },
-                    descricao: { type: "STRING", description: "Descrição do gasto (ex: 'Uber', 'Almoço')." },
-                    categoria: { type: "STRING", description: "Categoria (Alimentação, Transporte, Saúde, Educação, Outros)." }
+                    entidade: { 
+                      type: "STRING", 
+                      description: "Onde salvar. Valores permitidos: 'despesa', 'receita', 'peso', 'treino', 'inbox', 'agenda', 'kanban'." 
+                    },
+                    payload_json: { 
+                      type: "STRING", 
+                      description: "Uma string em formato JSON contendo os dados estruturados a serem salvos. Ex: '{\"valor\": 50, \"descricao\": \"Uber\", \"categoria\": \"Transporte\"}'" 
+                    }
                   },
-                  required: ["valor", "descricao"]
+                  required: ["entidade", "payload_json"]
                 }
               },
               {
-                name: "adicionar_receita",
-                description: "Registra um dinheiro recebido no caixa.",
+                name: "alterar_dado",
+                description: "Conclui, atualiza ou deleta um registro existente na Memória.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    valor: { type: "NUMBER", description: "O valor numérico." },
-                    descricao: { type: "STRING", description: "Origem da receita." },
-                    categoria: { type: "STRING", description: "Categoria (Salário, Bolsa, Freelance, Outros)." }
+                    acao: { type: "STRING", description: "Valores permitidos: 'concluir', 'deletar', 'atualizar'" },
+                    entidade: { type: "STRING", description: "Onde alterar ('inbox', 'agenda', 'financas', 'kanban')" },
+                    id: { type: "STRING", description: "O ID exato lido na sua Memória Atual." },
+                    novo_payload_json: { type: "STRING", description: "Se a ação for 'atualizar', passe o JSON em string com os novos dados." }
                   },
-                  required: ["valor", "descricao"]
+                  required: ["acao", "entidade", "id"]
                 }
               },
               {
-                name: "adicionar_agenda",
-                description: "Marca um compromisso no calendário.",
+                name: "consultar_dados",
+                description: "Lê relatórios gerais ou busca informações no banco de dados.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    titulo: { type: "STRING", description: "O nome do compromisso." },
-                    data: { type: "STRING", description: "Data no formato YYYY-MM-DD. Use o contexto de tempo para calcular 'hoje' ou 'amanhã'." },
-                    hora: { type: "STRING", description: "Hora no formato HH:MM (ex: '14:30')." }
+                    entidade: { type: "STRING", description: "Qual módulo consultar ('relatorio_diario', 'financas', 'agenda')." }
                   },
-                  required: ["titulo", "data"]
-                }
-              },
-              {
-                name: "registrar_peso",
-                description: "Salva o registro de pesagem corporal.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    peso: { type: "NUMBER", description: "Valor do peso em kg." }
-                  },
-                  required: ["peso"]
-                }
-              },
-              {
-                name: "adicionar_treino",
-                description: "Registra um exercício físico realizado.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    modalidade: { type: "STRING", description: "Tipo de treino (Musculação, Corrida, etc)." },
-                    duracao: { type: "NUMBER", description: "Duração total em minutos." }
-                  },
-                  required: ["modalidade", "duracao"]
-                }
-              },
-              {
-                name: "adicionar_tarefa_inbox",
-                description: "Coloca uma lembrança ou pendência na Caixa de Entrada.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    titulo: { type: "STRING", description: "A tarefa em si." },
-                    data: { type: "STRING", description: "Data limite YYYY-MM-DD, se fornecida." }
-                  },
-                  required: ["titulo"]
-                }
-              },
-              {
-                name: "adicionar_kanban",
-                description: "Cria um cartão no projeto Kanban.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    titulo: { type: "STRING", description: "O que deve ser feito." },
-                    status: { type: "STRING", description: "Em qual coluna entrar ('backlog', 'todo', 'in_progress', 'done'). Padrão é 'backlog'." }
-                  },
-                  required: ["titulo"]
-                }
-              },
-              {
-                name: "concluir_tarefa",
-                description: "Marca uma tarefa da Caixa de Entrada (Inbox) ou compromisso da Agenda como concluído.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    id: { type: "STRING", description: "O ID exato da tarefa fornecido na Memória Atual." },
-                    origem: { type: "STRING", description: "Escreva 'inbox' se for da Caixa de Entrada, ou 'agenda' se for um compromisso." }
-                  },
-                  required: ["id", "origem"]
-                }
-              },
-              {
-                name: "deletar_registro",
-                description: "Apaga um registro existente do banco de dados (finanças, agenda, inbox, kanban). Use o ID exato lido na sua Memória.",
-                parameters: {
-                  type: "OBJECT",
-                  properties: {
-                    id: { type: "STRING", description: "O ID único do registro a ser apagado." },
-                    modulo: { type: "STRING", description: "O módulo do registro: 'financeiro', 'agenda', 'inbox' ou 'kanban'." }
-                  },
-                  required: ["id", "modulo"]
+                  required: ["entidade"]
                 }
               }
             ]
@@ -215,12 +144,24 @@ export class GeminiLiveConnection {
     }
   }
 
+  // Usado quando o VAD detecta que o usuário parou de falar
   forcarResposta() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ clientContent: { turnComplete: true } }));
     }
   }
 
+  // NOVO: Corta a fala atual da IA se o usuário interromper
+  interromperGeracao() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // Enviar um clientContent vazio retoma o controle para o usuário instantaneamente
+      this.ws.send(JSON.stringify({
+        clientContent: { turns: [{ role: "user", parts: [] }], turnComplete: false }
+      }));
+    }
+  }
+
+  // Como deve ser chamado no Frontend para garantir agilidade
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const msg = {
@@ -228,7 +169,7 @@ export class GeminiLiveConnection {
           functionResponses: [{
             id: idChamada,
             name: nomeFuncao,
-            response: { result: resultado }
+            response: { result: resultado } // Pode enviar algo fixo para não esperar o BD
           }]
         }
       };

@@ -10,6 +10,7 @@ import { useFinanceStore } from './store/useFinanceStore';
 import { useInboxStore } from './store/useInboxStore';
 import { useKanbanStore } from './store/useKanbanStore';
 import { useFitnessStore } from './store/useFitnessStore';
+import { useChatStore } from './store/useChatStore'; // <-- NOVO: Hipocampo importado
 
 // IMPORT DO SERVIÇO DE PUSH NOTIFICATION
 import { registrarPushNoCelular } from './services/pushService';
@@ -67,6 +68,7 @@ function App() {
   const fetchInboxTasks = useInboxStore(state => state.fetchInboxTasks);
   const fetchKanbanTasks = useKanbanStore(state => state.fetchKanbanTasks);
   const fetchHealthLogs = useFitnessStore(state => state.fetchHealthLogs);
+  const fetchMemoria = useChatStore(state => state.fetchMemoria); // <-- NOVO: Função de pré-aquecimento
 
   const [showLoading, setShowLoading] = useState(true);
 
@@ -85,11 +87,12 @@ function App() {
       if (fetchInboxTasks) fetchInboxTasks();
       if (fetchKanbanTasks) fetchKanbanTasks();
       if (fetchHealthLogs) fetchHealthLogs();
+      if (fetchMemoria) fetchMemoria(); // <-- NOVO: Puxa o histórico de IA imediatamente no login
       
       // Registra o aparelho no banco de dados para a Vercel conseguir enviar as mensagens
       registrarPushNoCelular(); 
     }
-  }, [user, fetchAgendaItems, fetchTransactions, fetchInboxTasks, fetchKanbanTasks, fetchHealthLogs]);
+  }, [user, fetchAgendaItems, fetchTransactions, fetchInboxTasks, fetchKanbanTasks, fetchHealthLogs, fetchMemoria]); // <-- NOVO: fetchMemoria na dependência
 
   // =====================================================================
   // MOTOR 3: PERMISSÃO DE NOTIFICAÇÕES (O Cérebro agora roda na Vercel)
