@@ -1,6 +1,18 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase'; 
+import { supabase } from '../lib/supabase';
 import { useAuthStore } from './useAuthStore';
+
+// Mantém a lista sempre ordenada por Data e Horário no estado local
+const sortAgendaItems = (items = []) => {
+  return [...items].sort((a, b) => {
+    const dateCompare = (a.date || '').localeCompare(b.date || '');
+    if (dateCompare !== 0) return dateCompare;
+    if (!a.time && !b.time) return 0;
+    if (!a.time) return 1;
+    if (!b.time) return -1;
+    return a.time.localeCompare(b.time);
+  });
+};
 
 export const useAgendaStore = create((set, get) => ({
   agendaItems: [],
@@ -19,7 +31,7 @@ export const useAgendaStore = create((set, get) => ({
         .order('time', { ascending: true });
 
       if (error) throw error;
-      set({ agendaItems: data });
+      set({ agendaItems: sortAgendaItems(data || []) });
     } catch (error) {
       set({ error: error.message });
       console.error('Erro ao buscar agenda:', error);
@@ -28,31 +40,52 @@ export const useAgendaStore = create((set, get) => ({
     }
   },
 
-  // 2. ADICIONAR NOVO ITEM NA AGENDA (Evento, Tarefa, etc)
-  addAgendaItem: async (item) => {
+  // 2. ADICIONAR NOVO ITEM (Aceita 1 objeto OU um Array para eventos recorrentes em lote!)
+  addAgendaItem: async (itemInput) => {
     set({ isLoading: true, error: null });
-    
-    const userId = useAuthStore.getState().user?.id;
-    
+
+    let userId = useAuthStore.getState().user?.id;
+    if (!userId) {
+      const { data: authData } = await supabase.auth.getUser();
+      userId = authData?.user?.id;
+    }
+
     if (!userId) {
       set({ error: 'Usuário não autenticado', isLoading: false });
-      throw new Error('Usuário não autenticado'); // Repassa o erro
+      throw new Error('Usuário não autenticado');
     }
+
+    const itemsArray = Array.isArray(itemInput) ? itemInput : [itemInput];
+
+    const payloads = itemsArray.map((item) => {
+      const { id, ...rest } = item;
+      return {
+        ...rest,
+        title: (rest.title || '').trim(),
+        time: rest.time && rest.time.trim() !== '' ? rest.time : null, // Evita erro de tipo TIME no Postgres
+        category: rest.category || 'evento',
+        user_id: userId
+      };
+    });
 
     try {
       const { data, error } = await supabase
         .from('agenda_items')
-        .insert([{ ...item, user_id: userId }])
+        .insert(payloads)
         .select();
 
       if (error) throw error;
-      
-      set((state) => ({ agendaItems: [...state.agendaItems, data[0]] }));
-      return data[0];
+
+      const inserted = data || [];
+      set((state) => ({
+        agendaItems: sortAgendaItems([...state.agendaItems, ...inserted])
+      }));
+
+      return Array.isArray(itemInput) ? inserted : inserted[0];
     } catch (error) {
       set({ error: error.message });
       console.error('[Supabase] Erro Crítico ao adicionar item na Agenda:', error);
-      throw error; // O SEGREDO ESTÁ AQUI: Isso faz o Bastian saber que falhou!
+      throw error; // Repassa o erro para o Bastian / BarraComandoIA
     } finally {
       set({ isLoading: false });
     }
@@ -61,21 +94,30 @@ export const useAgendaStore = create((set, get) => ({
   // 3. ATUALIZAR ITEM EXISTENTE (Editar)
   updateAgendaItem: async (id, updatedItem) => {
     set({ isLoading: true, error: null });
-    
+
+    const payload = {
+      ...updatedItem,
+      title: updatedItem.title ? updatedItem.title.trim() : undefined,
+      time: updatedItem.time && updatedItem.time.trim() !== '' ? updatedItem.time : null
+    };
+
     try {
       const { data, error } = await supabase
         .from('agenda_items')
-        .update(updatedItem)
+        .update(payload)
         .eq('id', id)
-        .select();
+        .select()
+        .single();
 
       if (error) throw error;
 
       set((state) => ({
-        agendaItems: state.agendaItems.map((item) =>
-          item.id === id ? { ...item, ...data[0] } : item
-        ),
+        agendaItems: sortAgendaItems(
+          state.agendaItems.map((item) => (item.id === id ? { ...item, ...data } : item))
+        )
       }));
+
+      return data;
     } catch (error) {
       set({ error: error.message });
       console.error('Erro ao atualizar item:', error);
@@ -85,20 +127,21 @@ export const useAgendaStore = create((set, get) => ({
     }
   },
 
-  // 4. DELETAR ITEM DA AGENDA (Excluir)
-  deleteAgendaItem: async (id) => {
+  // 4. DELETAR ITEM DA AGENDA (Suporta 1 ID ou um Array de IDs)
+  deleteAgendaItem: async (idOrIds) => {
     set({ isLoading: true, error: null });
-    
+    const idsArray = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+
     try {
       const { error } = await supabase
         .from('agenda_items')
         .delete()
-        .eq('id', id);
+        .in('id', idsArray);
 
       if (error) throw error;
 
       set((state) => ({
-        agendaItems: state.agendaItems.filter((item) => item.id !== id),
+        agendaItems: state.agendaItems.filter((item) => !idsArray.includes(item.id))
       }));
     } catch (error) {
       set({ error: error.message });
@@ -109,20 +152,26 @@ export const useAgendaStore = create((set, get) => ({
     }
   },
 
-  // 5. MARCAR COMO CONCLUÍDO/PENDENTE
+  // 5. MARCAR COMO CONCLUÍDO / PENDENTE
   toggleItemCompletion: async (id, currentStatus) => {
+    const targetItem = get().agendaItems.find((i) => i.id === id);
+    const resolvedStatus = currentStatus !== undefined ? currentStatus : Boolean(targetItem?.is_completed);
+    const nextStatus = !resolvedStatus;
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('agenda_items')
-        .update({ is_completed: !currentStatus })
-        .eq('id', id);
+        .update({ is_completed: nextStatus })
+        .eq('id', id)
+        .select()
+        .single();
 
       if (error) throw error;
 
       set((state) => ({
         agendaItems: state.agendaItems.map((item) =>
-          item.id === id ? { ...item, is_completed: !currentStatus } : item
-        ),
+          item.id === id ? { ...item, ...(data || { is_completed: nextStatus }) } : item
+        )
       }));
     } catch (error) {
       console.error('Erro ao atualizar status:', error);
