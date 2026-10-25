@@ -14,6 +14,9 @@ import { useChatStore } from '../store/useChatStore';
 
 export default function BarraComandoIA() {
   const [aiState, setAiState] = useState('idle'); 
+  // CORREÇÃO CRÍTICA DO TRAVAMENTO: O Ref acompanha o estado em tempo real dentro das funções fechadas
+  const aiStateRef = useRef('idle'); 
+
   const [isIntercomActive, setIsIntercomActive] = useState(false);
   const [ultimaMensagem, setUltimaMensagem] = useState(null);
   
@@ -21,8 +24,13 @@ export default function BarraComandoIA() {
   const audioManagerRef = useRef(null);
   const speakingTimeoutRef = useRef(null);
   const mensagemTimeoutRef = useRef(null);
-
   const hasGreetedRef = useRef(false); 
+
+  // Função centralizada para mudar o estado e a referência de forma segura
+  const updateAiState = (newState) => {
+    aiStateRef.current = newState;
+    setAiState(newState);
+  };
 
   useEffect(() => {
     useChatStore.getState().fetchMemoria();
@@ -38,38 +46,14 @@ export default function BarraComandoIA() {
     const horaAtualExata = new Date().toLocaleTimeString();
 
     const saldo = useFinanceStore.getState().balance;
-    const transacoes = useFinanceStore.getState().transactions.map(t => ({ id: t.id, descricao: t.description, valor: t.amount, tipo: t.type, data: t.date, status: t.status }));
+    const transacoes = useFinanceStore.getState().transactions.map(t => ({ id: t.id, descricao: t.description, valor: t.amount, tipo: t.type, data: t.date }));
     const compromissos = useAgendaStore.getState().agendaItems.map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, concluido: e.is_completed }));
-    const pendencias = useInboxStore.getState().inboxTasks.map(t => ({ id: t.id, titulo: t.title, data_limite: t.date, concluido: t.completed }));
-    const kanban = useKanbanStore.getState().tasks.map(t => ({ id: t.id, titulo: t.title, status: t.status }));
-    const historicoSaude = useFitnessStore.getState().healthLogs.map(l => ({ categoria: l.type, registro: l.name, valor: l.value, unidade: l.unit, data: l.date }));
     
-    const memoriasNuvem = useChatStore.getState().mensagensRecentes;
-    const historicoRecente = memoriasNuvem.length > 0 
-      ? memoriasNuvem.map((msg, idx) => `[Memória ${idx + 1}]: Você disse: "${msg}"`).join(' | ')
-      : 'Nenhuma conversa recente.';
-
     return `
-      INFORMAÇÕES DO SISTEMA (TEMPO REAL):
-      - Data de Hoje: ${dataHojeExata}
-      - Hora Atual: ${horaAtualExata}
-
-      Memória de Longo Prazo Atualizada:
-      - Saldo Atual: R$ ${saldo.toFixed(2)}
-      - Fluxo de Caixa: ${JSON.stringify(transacoes)}
-      - Agenda: ${JSON.stringify(compromissos)}
-      - Inbox: ${JSON.stringify(pendencias)}
-      - Kanban: ${JSON.stringify(kanban)}
-      - Saúde: ${JSON.stringify(historicoSaude)}
-
-      Memória de Curto Prazo em Nuvem:
-      ${historicoRecente}
-
-      REGRAS CRÍTICAS DE COMPORTAMENTO:
-      1. NUNCA FAÇA UM RELATÓRIO A NÃO SER QUE O USUÁRIO PEÇA EXPLICITAMENTE.
-      2. OBRIGAÇÃO DE USAR FERRAMENTAS: Use 'registrar_dado', 'alterar_dado' ou 'consultar_dados' ANTES de responder.
-      3. FORMATO DE DATA: ESTRITAMENTE YYYY-MM-DD.
-      4. Respostas curtas. Haja como um executivo auxiliando o usuário (Yuri).
+      Data Atual: ${dataHojeExata} | Hora: ${horaAtualExata}
+      Saldo: R$ ${saldo.toFixed(2)}
+      Finanças: ${JSON.stringify(transacoes)}
+      Agenda: ${JSON.stringify(compromissos)}
     `;
   };
 
@@ -87,7 +71,7 @@ export default function BarraComandoIA() {
   };
 
   const ligarSistema = async () => {
-    setAiState('starting');
+    updateAiState('starting');
     setIsIntercomActive(true);
 
     try {
@@ -98,28 +82,29 @@ export default function BarraComandoIA() {
       };
 
       const aoDetectarSilencio = () => {
-        if (liveConnectionRef.current && aiState !== 'speaking') {
+        // CORREÇÃO: Só avisa o Gemini que você terminou se ele realmente estiver escutando.
+        // Isso impede o loop infinito de "turnComplete" que o deixava calado e travado no laranja.
+        if (liveConnectionRef.current && aiStateRef.current === 'listening') {
           liveConnectionRef.current.forcarResposta();
-          setAiState('processing'); 
+          updateAiState('processing'); 
         }
       };
 
-      // NOVO: A INTERRUPÇÃO ATIVA J.A.R.V.I.S.
       const aoComecarFalar = () => {
-        if (audioManagerRef.current && audioManagerRef.current.isPlaying()) {
-          audioManagerRef.current.pararAudioAtual(); // Cala a caixa de som imediatamente
-          if (liveConnectionRef.current) {
-            liveConnectionRef.current.interromperGeracao(); // Avisa o Gemini para parar de gerar
-          }
+        if (aiStateRef.current === 'speaking' || aiStateRef.current === 'processing') {
+          if (audioManagerRef.current) audioManagerRef.current.pararAudioAtual();
+          if (liveConnectionRef.current) liveConnectionRef.current.interromperGeracao();
         }
-        setAiState('listening');
+        updateAiState('listening');
       };
 
       const aoReceberAudioDaIA = (base64Audio) => {
-        setAiState('speaking'); 
+        updateAiState('speaking'); 
         if (audioManagerRef.current) audioManagerRef.current.tocarAudio(base64Audio);
         if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
-        speakingTimeoutRef.current = setTimeout(() => setAiState('listening'), 1500); 
+        speakingTimeoutRef.current = setTimeout(() => {
+          if (aiStateRef.current === 'speaking') updateAiState('listening');
+        }, 1500); 
       };
 
       const aoReceberTextoDaIA = (textoBruto) => {
@@ -132,23 +117,31 @@ export default function BarraComandoIA() {
         }
       };
 
-      // NOVO: ROTEADOR DE FUNÇÕES UNIFICADAS COM RESPOSTA OTIMISTA
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
-        setAiState('processing'); 
+        updateAiState('processing'); 
         const { id, name, args } = functionCallInfo;
         const dataHoje = new Date().toISOString().split('T')[0];
 
-        // 1. SE FOR GRAVAÇÃO, RESPONDE INSTANTANEAMENTE PARA O BASTIAN NÃO TRAVAR
+        // 1. Resposta Otimista (Agora como um OBJETO REAL para a API não travar)
         if (name === "registrar_dado" || name === "alterar_dado") {
-           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, "{\"status\": \"sucesso\", \"detalhe\": \"Executando no banco local.\"}");
+           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, { status: "sucesso", detalhe: "Ação aceita pelo banco local." });
         }
 
-        // 2. EXECUÇÃO EM BACKGROUND
+        // 2. Execução de Fundo
         try {
           if (name === "registrar_dado") {
-            const dados = JSON.parse(args.payload_json);
+            // CORREÇÃO: "args.dados" já vem como objeto nativo agora, sem necessidade de JSON.parse quebrado.
+            const dados = args.dados || {}; 
             
             switch (args.entidade) {
+              case 'agenda':
+                useAgendaStore.getState().addAgendaItem({ 
+                  title: dados.titulo || dados.title || "Novo Evento", 
+                  date: dados.data || dados.date || dataHoje, 
+                  time: dados.hora || dados.time || null 
+                });
+                exibirMensagem(`📅 Agenda: ${dados.titulo || "Evento Adicionado"}`);
+                break;
               case 'despesa':
                 useFinanceStore.getState().addTransaction({ amount: Number(dados.valor), description: dados.descricao, type: 'despesa', category: dados.categoria || 'Outros', date: dataHoje, status: 'pago' });
                 exibirMensagem(`💸 Despesa: ${dados.descricao}`);
@@ -168,10 +161,6 @@ export default function BarraComandoIA() {
               case 'inbox':
                 useInboxStore.getState().addInboxTask(dados.titulo, dados.data || dataHoje);
                 exibirMensagem(`📥 Inbox: ${dados.titulo}`);
-                break;
-              case 'agenda':
-                useAgendaStore.getState().addAgendaItem({ title: dados.titulo, date: dados.data, time: dados.hora || null });
-                exibirMensagem(`📅 Agenda: ${dados.titulo}`);
                 break;
               case 'kanban':
                 useKanbanStore.getState().addTask(dados.titulo, dados.status || 'backlog');
@@ -195,40 +184,29 @@ export default function BarraComandoIA() {
           } 
           
           else if (name === "consultar_dados") {
-             let dadosParaIA = "";
+             let relatorio = {};
              
-             // Envia apenas o que foi solicitado, reduzindo drasticamente o tempo de raciocínio da IA
              if (args.entidade === 'financas') {
-                const transacoes = useFinanceStore.getState().transactions;
-                const saldo = useFinanceStore.getState().balance;
-                dadosParaIA = JSON.stringify({ saldo_atual: saldo, historico_transacoes: transacoes });
+                relatorio = { saldo: useFinanceStore.getState().balance, historico: useFinanceStore.getState().transactions };
              } 
              else if (args.entidade === 'agenda') {
-                dadosParaIA = JSON.stringify(useAgendaStore.getState().agendaItems);
-             }
-             else if (args.entidade === 'inbox') {
-                dadosParaIA = JSON.stringify(useInboxStore.getState().inboxTasks);
-             }
-             else if (args.entidade === 'kanban') {
-                dadosParaIA = JSON.stringify(useKanbanStore.getState().tasks);
+                relatorio = { agenda: useAgendaStore.getState().agendaItems };
              }
              else {
-                dadosParaIA = gerarContextoDinâmico(); // Se ele pedir algo geral, manda tudo
+                relatorio = { resumo_geral: gerarContextoDinâmico() }; 
              }
 
              exibirMensagem(`📊 Lendo banco de dados (${args.entidade})...`);
-             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, dadosParaIA);
+             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, relatorio);
           }
 
         } catch (erro) {
-          console.error("Erro ao processar ferramenta de fundo:", erro);
+          console.error("Erro interno ao processar ferramenta:", erro);
         }
       };
 
       liveConnectionRef.current = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA, aoReceberChamadaDeFuncao);
       await liveConnectionRef.current.conectar(gerarContextoDinâmico());
-      
-      // Passando o NOVO parâmetro aoComecarFalar
       await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio, aoComecarFalar); 
 
       const saudacao = obterSaudacaoTemporal();
@@ -244,7 +222,7 @@ export default function BarraComandoIA() {
         }
       }, 1000); 
 
-      setAiState('listening');
+      updateAiState('listening');
 
     } catch (erro) {
       desligarSistema();
@@ -257,7 +235,7 @@ export default function BarraComandoIA() {
     if (liveConnectionRef.current) { liveConnectionRef.current.desconectar(); liveConnectionRef.current = null; }
     if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
     setIsIntercomActive(false);
-    setAiState('idle');
+    updateAiState('idle');
     setUltimaMensagem(null);
   };
 

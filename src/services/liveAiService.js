@@ -50,16 +50,15 @@ export class GeminiLiveConnection {
             Seu usuário é Yuri, mestrando em economia.
             
             [CONTEXTO DE ESPAÇO-TEMPO]
-            Localização: Fortaleza, CE. Data e hora exata: ${horaLocal} (Fuso: ${fusoLocal}).
+            Localização: Fortaleza, CE. Data e hora exata: ${horaLocal} (Fuso:${fusoLocal}).
             
-            [DADOS DO SISTEMA ATUAL]
+            [DADOS DO SISTEMA]
             ${contextoDoSistema}
             
-            [REGRAS DE CONVERSA E AÇÃO]
-            - Responda de forma direta, concisa e natural em Português do Brasil.
-            - NUNCA utilize formatação Markdown.
-            - AO LER RELATÓRIOS: Seja extremamente direto. Fale os totais e faça um resumo executivo rápido. NUNCA leia listas item por item a menos que o usuário exija explicitamente.
-            - Sempre chame a ferramenta de banco de dados correspondente ANTES de responder.`
+            [REGRAS]
+            - Responda de forma direta e concisa em Português do Brasil.
+            - NUNCA leia listas inteiras ou faça relatórios longos a menos que solicitado.
+            - Sempre chame a ferramenta correspondente ANTES de responder.`
           }]
         },
 
@@ -72,10 +71,10 @@ export class GeminiLiveConnection {
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    entidade: { type: "STRING", description: "'despesa', 'receita', 'peso', 'treino', 'inbox', 'agenda', 'kanban'." },
-                    payload_json: { type: "STRING", description: "Dados estruturados em JSON." }
+                    entidade: { type: "STRING", description: "Valores permitidos: 'despesa', 'receita', 'peso', 'treino', 'inbox', 'agenda', 'kanban'." },
+                    dados: { type: "OBJECT", description: "As chaves e valores. Ex para agenda: {titulo: 'Reunião', data: '2026-10-10', hora: '14:00'}" }
                   },
-                  required: ["entidade", "payload_json"]
+                  required: ["entidade", "dados"]
                 }
               },
               {
@@ -139,23 +138,23 @@ export class GeminiLiveConnection {
     }
   }
 
-  // CORRIGIDO: Agora avisa a API corretamente para interromper sem confundi-la
   interromperGeracao() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
-        clientContent: { turnComplete: false } // Apenas avisa que o usuário tomou a palavra
+        clientContent: { turns: [{ role: "user", parts: [] }], turnComplete: true } 
       }));
     }
   }
 
-  enviarRespostaDeFuncao(idChamada, nomeFuncao, resultado) {
+  // CORRIGIDO: A API exige que o result seja um objeto, não uma string literal
+  enviarRespostaDeFuncao(idChamada, nomeFuncao, resultadoObj) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const msg = {
         toolResponse: {
           functionResponses: [{
             id: idChamada,
             name: nomeFuncao,
-            response: { result: resultado } 
+            response: resultadoObj 
           }]
         }
       };

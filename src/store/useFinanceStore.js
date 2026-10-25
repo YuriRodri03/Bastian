@@ -1,76 +1,97 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 
-// Função utilitária para garantir que o saldo esteja sempre 100% sincronizado com a lista
-const calculateBalance = (transactions) => {
-  return transactions.reduce((acc, t) => {
-    const isRealized = (t.status || 'pago') === 'pago';
-    if (isRealized) {
-      return t.type === 'receita' ? acc + t.amount : acc - t.amount;
-    }
-    return acc;
-  }, 0);
+// Utilitário para calcular Saldo em Conta e Total Investido de forma 100% sincronizada
+const calculateStoreTotals = (transactions = []) => {
+  return transactions.reduce(
+    (acc, t) => {
+      const isRealized = (t.status || 'pago') === 'pago';
+      if (isRealized) {
+        const val = Number(t.amount) || 0;
+        if (t.type === 'receita') acc.balance += val;
+        if (t.type === 'despesa') acc.balance -= val;
+
+        if (t.category === 'Aporte de Investimento') acc.investedBalance += val;
+        if (t.category === 'Resgate de Investimento') acc.investedBalance -= val;
+      }
+      return acc;
+    },
+    { balance: 0, investedBalance: 0 }
+  );
 };
 
 export const useFinanceStore = create((set, get) => ({
   transactions: [],
   balance: 0,
+  investedBalance: 0,
   isLoading: false,
 
   // 1. Busca inicial
   fetchTransactions: async () => {
     set({ isLoading: true });
-    
+
     const { data, error } = await supabase
       .from('transactions')
       .select('*')
       .order('date', { ascending: false });
 
     if (error) {
-      console.error("Erro ao buscar dados:", error);
+      console.error('Erro ao buscar dados:', error);
     } else {
-      set({ 
-        transactions: data, 
-        balance: calculateBalance(data) 
+      const safeData = data || [];
+      const { balance, investedBalance } = calculateStoreTotals(safeData);
+      set({
+        transactions: safeData,
+        balance,
+        investedBalance
       });
     }
-    
+
     set({ isLoading: false });
   },
 
-  // 2. Criar
-  addTransaction: async (transactionData) => {
+  // 2. Criar (Suporta tanto 1 objeto quanto um Array de parcelas em lote!)
+  addTransaction: async (transactionInput) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
+
     if (userError || !user) {
-      console.error("Usuário não autenticado:", userError);
-      throw new Error("Usuário não autenticado"); // Alerta de falha repassado
+      console.error('Usuário não autenticado:', userError);
+      throw new Error('Usuário não autenticado');
     }
 
-    const { id, ...dataToInsert } = transactionData;
-    const payload = {
-      ...dataToInsert,
-      user_id: user.id
-    };
-    
+    const itemsArray = Array.isArray(transactionInput) ? transactionInput : [transactionInput];
+
+    const payloads = itemsArray.map((item) => {
+      const { id, ...dataToInsert } = item;
+      return {
+        ...dataToInsert,
+        amount: Number(dataToInsert.amount) || 0,
+        user_id: user.id
+      };
+    });
+
     const { data, error } = await supabase
       .from('transactions')
-      .insert([payload])
-      .select()
-      .single();
+      .insert(payloads)
+      .select();
 
     if (error) {
-      console.error("[Supabase] Erro detalhado ao adicionar:", error.message, error.details, error.hint);
-      throw error; // Alerta crítico repassado para o Bastian
+      console.error('[Supabase] Erro detalhado ao adicionar:', error.message, error.details, error.hint);
+      throw error; // Repassado para o Bastian / BarraComandoIA
     }
 
+    const insertedItems = data || [];
     const currentTransactions = get().transactions;
-    const newTransactions = [data, ...currentTransactions];
-    
-    set({ 
-      transactions: newTransactions, 
-      balance: calculateBalance(newTransactions) 
+    const newTransactions = [...insertedItems, ...currentTransactions];
+    const { balance, investedBalance } = calculateStoreTotals(newTransactions);
+
+    set({
+      transactions: newTransactions,
+      balance,
+      investedBalance
     });
+
+    return insertedItems.length === 1 ? insertedItems[0] : insertedItems;
   },
 
   // 3. Atualizar
@@ -78,7 +99,7 @@ export const useFinanceStore = create((set, get) => ({
     const { data, error } = await supabase
       .from('transactions')
       .update({
-        amount: updatedTransaction.amount,
+        amount: Number(updatedTransaction.amount) || 0,
         description: updatedTransaction.description,
         type: updatedTransaction.type,
         category: updatedTransaction.category,
@@ -90,22 +111,24 @@ export const useFinanceStore = create((set, get) => ({
       .single();
 
     if (error) {
-      console.error("Erro ao atualizar:", error);
-      throw error; // Alerta crítico
+      console.error('Erro ao atualizar:', error);
+      throw error;
     }
 
     const currentTransactions = get().transactions;
-    const newTransactions = currentTransactions.map(t => 
+    const newTransactions = currentTransactions.map((t) =>
       t.id === data.id ? data : t
     );
+    const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
-    set({ 
-      transactions: newTransactions, 
-      balance: calculateBalance(newTransactions) 
+    set({
+      transactions: newTransactions,
+      balance,
+      investedBalance
     });
   },
 
-  // 4. Deletar (Renomeado para sincronizar com a BarraComandoIA)
+  // 4. Deletar (Sincronizado com a BarraComandoIA)
   deleteTransaction: async (id) => {
     const { error } = await supabase
       .from('transactions')
@@ -113,25 +136,28 @@ export const useFinanceStore = create((set, get) => ({
       .eq('id', id);
 
     if (error) {
-      console.error("Erro ao remover:", error);
-      throw error; // Alerta crítico
+      console.error('Erro ao remover:', error);
+      throw error;
     }
 
     const currentTransactions = get().transactions;
-    const newTransactions = currentTransactions.filter(t => t.id !== id);
+    const newTransactions = currentTransactions.filter((t) => t.id !== id);
+    const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
-    set({ 
-      transactions: newTransactions, 
-      balance: calculateBalance(newTransactions) 
+    set({
+      transactions: newTransactions,
+      balance,
+      investedBalance
     });
   },
 
   // 5. Alternar Status Rápido
   toggleTransactionStatus: async (id) => {
-    const transaction = get().transactions.find(t => t.id === id);
+    const transaction = get().transactions.find((t) => t.id === id);
     if (!transaction) return;
 
-    const newStatus = transaction.status === 'pago' ? 'pendente' : 'pago';
+    const currentStatus = transaction.status || 'pago';
+    const newStatus = currentStatus === 'pago' ? 'pendente' : 'pago';
 
     const { data, error } = await supabase
       .from('transactions')
@@ -141,18 +167,20 @@ export const useFinanceStore = create((set, get) => ({
       .single();
 
     if (error) {
-      console.error("Erro ao mudar status:", error);
-      throw error; // Alerta crítico
+      console.error('Erro ao mudar status:', error);
+      throw error;
     }
 
     const currentTransactions = get().transactions;
-    const newTransactions = currentTransactions.map(t => 
+    const newTransactions = currentTransactions.map((t) =>
       t.id === id ? data : t
     );
+    const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
-    set({ 
-      transactions: newTransactions, 
-      balance: calculateBalance(newTransactions) 
+    set({
+      transactions: newTransactions,
+      balance,
+      investedBalance
     });
   }
 }));
