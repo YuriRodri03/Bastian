@@ -10,7 +10,7 @@ import { useFinanceStore } from './store/useFinanceStore';
 import { useInboxStore } from './store/useInboxStore';
 import { useKanbanStore } from './store/useKanbanStore';
 import { useFitnessStore } from './store/useFitnessStore';
-import { useChatStore } from './store/useChatStore'; // <-- NOVO: Hipocampo importado
+import { useChatStore } from './store/useChatStore';
 
 // IMPORT DO SERVIÇO DE PUSH NOTIFICATION
 import { registrarPushNoCelular } from './services/pushService';
@@ -23,6 +23,7 @@ import Agenda from './pages/Agenda';
 import Treino from './pages/Treino';
 import Navbar from './components/Navbar';
 import BarraComandoIA from './components/BarraComandoIA';
+import FloatingPomodoro from './components/FloatingPomodoro';
 
 // =====================================================================
 // 1. REGISTRO DO SERVICE WORKER (Bastian Notifier)
@@ -207,6 +208,8 @@ function App() {
 
       {/* A mente onipresente do Bastian */}
       <BarraComandoIA />
+      
+      <FloatingPomodoro />
       
     </BrowserRouter>
   );
