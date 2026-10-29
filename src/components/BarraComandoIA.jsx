@@ -12,9 +12,17 @@ import { useKanbanStore } from '../store/useKanbanStore';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { useChatStore } from '../store/useChatStore'; 
 
+// Data local exata (evita virar o dia às 21h por causa do UTC)
+const getLocalTodayISO = () => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 export default function BarraComandoIA() {
   const [aiState, setAiState] = useState('idle'); 
-  // CORREÇÃO CRÍTICA DO TRAVAMENTO: O Ref acompanha o estado em tempo real dentro das funções fechadas
   const aiStateRef = useRef('idle'); 
 
   const [isIntercomActive, setIsIntercomActive] = useState(false);
@@ -26,14 +34,13 @@ export default function BarraComandoIA() {
   const mensagemTimeoutRef = useRef(null);
   const hasGreetedRef = useRef(false); 
 
-  // Função centralizada para mudar o estado e a referência de forma segura
   const updateAiState = (newState) => {
     aiStateRef.current = newState;
     setAiState(newState);
   };
 
   useEffect(() => {
-    useChatStore.getState().fetchMemoria();
+    useChatStore.getState().fetchMemoria?.();
   }, []);
 
   const limparMarkdown = (texto) => {
@@ -41,20 +48,159 @@ export default function BarraComandoIA() {
     return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
-  const gerarContextoDinâmico = () => {
-    const dataHojeExata = new Date().toISOString().split('T')[0];
-    const horaAtualExata = new Date().toLocaleTimeString();
+  // Garante que todos os stores tenham dados carregados do Supabase antes de montar o contexto
+  const hidratarStoresSeNecessario = async () => {
+    const promises = [];
+    if (useFinanceStore.getState().transactions.length === 0) {
+      promises.push(useFinanceStore.getState().fetchTransactions());
+    }
+    if (useAgendaStore.getState().agendaItems.length === 0) {
+      promises.push(useAgendaStore.getState().fetchAgendaItems());
+    }
+    if (useInboxStore.getState().inboxTasks.length === 0) {
+      promises.push(useInboxStore.getState().fetchInboxTasks());
+    }
+    if (useKanbanStore.getState().tasks.length === 0) {
+      promises.push(useKanbanStore.getState().fetchKanbanTasks());
+    }
+    if (useFitnessStore.getState().healthLogs.length === 0) {
+      promises.push(useFitnessStore.getState().fetchHealthLogs?.());
+    }
+    if (promises.length > 0) {
+      await Promise.allSettled(promises);
+    }
+  };
 
-    const saldo = useFinanceStore.getState().balance;
-    const transacoes = useFinanceStore.getState().transactions.map(t => ({ id: t.id, descricao: t.description, valor: t.amount, tipo: t.type, data: t.date }));
-    const compromissos = useAgendaStore.getState().agendaItems.map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, concluido: e.is_completed }));
+  // =========================================================================
+  // MOTOR DE CONTEXTO E RAIO-X FINANCEIRO/PRODUTIVIDADE PARA O BASTIAN OPINAR
+  // =========================================================================
+  const gerarRelatorioExecutivo = () => {
+    const dataHoje = getLocalTodayISO();
+    const mesAtualPrefix = dataHoje.substring(0, 7); // 'YYYY-MM'
+    const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const { transactions, balance, investedBalance } = useFinanceStore.getState();
+    const { agendaItems } = useAgendaStore.getState();
+    const { inboxTasks } = useInboxStore.getState();
+    const { tasks: kanbanTasks } = useKanbanStore.getState();
+    const { healthLogs } = useFitnessStore.getState();
+
+    // Cálculos do Mês Atual para o Bastian não precisar somar de cabeça
+    let receitasPagasMes = 0;
+    let despesasOperacionaisPagasMes = 0;
+    let contasAPagarMes = 0;
+    let contasAReceberMes = 0;
+    let aportesMes = 0;
+    const gastosPorCategoria = {};
+
+    transactions.forEach((t) => {
+      const tDate = t.date && t.date.includes('/') 
+        ? t.date.split('/').reverse().join('-') 
+        : (t.date || '');
+      
+      if (tDate.startsWith(mesAtualPrefix)) {
+        const val = Number(t.amount) || 0;
+        const isPago = (t.status || 'pago') === 'pago';
+        const isAporte = t.category === 'Aporte de Investimento';
+        const isResgate = t.category === 'Resgate de Investimento';
+
+        if (t.type === 'receita') {
+          if (isPago && !isResgate) receitasPagasMes += val;
+          else if (!isPago) contasAReceberMes += val;
+        } else if (t.type === 'despesa') {
+          if (isPago) {
+            if (isAporte) aportesMes += val;
+            else {
+              despesasOperacionaisPagasMes += val;
+              gastosPorCategoria[t.category] = (gastosPorCategoria[t.category] || 0) + val;
+            }
+          } else {
+            contasAPagarMes += val;
+          }
+        }
+      }
+    });
+
+    const balancoLiquidoMes = receitasPagasMes - despesasOperacionaisPagasMes;
+    const saldoProjetadoFimDoMes = balance + contasAReceberMes - contasAPagarMes;
+    // Margem segura sugerida para guardar na reserva (ex: mantendo um colchão de R$ 300 em conta corrente)
+    const margemParaReserva = Math.max(0, saldoProjetadoFimDoMes - 300);
+
+    const contasPendentesLista = transactions
+      .filter(t => (t.status || 'pago') === 'pendente')
+      .slice(0, 12)
+      .map(t => ({ id: t.id, descricao: t.description.split(' [')[0], valor: t.amount, vencimento: t.date, tipo: t.type }));
+
+    const ultimasTransacoes = transactions
+      .slice(0, 15)
+      .map(t => ({ id: t.id, descricao: t.description.split(' [')[0], valor: t.amount, categoria: t.category, tipo: t.type, data: t.date, status: t.status }));
+
+    const compromissosProximos = agendaItems
+      .filter(e => !e.is_completed && e.date >= dataHoje)
+      .slice(0, 15)
+      .map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, categoria: e.category }));
+
+    const tarefasPendentes = inboxTasks
+      .filter(t => !t.completed)
+      .slice(0, 15)
+      .map(t => ({ id: t.id, titulo: t.title, data: t.date }));
+
+    const projetosKanban = kanbanTasks
+      .slice(0, 12)
+      .map(k => ({ id: k.id, titulo: k.title, coluna: k.status }));
+
+    const treinosMes = (healthLogs || []).filter(l => l.type === 'treino').length;
+    const ultimoPesoObj = (healthLogs || []).find(l => l.type === 'peso');
+
+    return {
+      data_hoje: dataHoje,
+      hora_atual: horaAtual,
+      resumo_financeiro: {
+        saldo_atual_em_conta: Number(balance.toFixed(2)),
+        total_investido_na_carteira: Number((investedBalance || 0).toFixed(2)),
+        receitas_pagas_no_mes: Number(receitasPagasMes.toFixed(2)),
+        despesas_operacionais_pagas_no_mes: Number(despesasOperacionaisPagasMes.toFixed(2)),
+        aportes_investidos_no_mes: Number(aportesMes.toFixed(2)),
+        balanco_operacional_do_mes: Number(balancoLiquidoMes.toFixed(2)),
+        contas_pendentes_a_pagar_no_mes: Number(contasAPagarMes.toFixed(2)),
+        valores_pendentes_a_receber_no_mes: Number(contasAReceberMes.toFixed(2)),
+        saldo_projetado_apos_pagar_pendencias: Number(saldoProjetadoFimDoMes.toFixed(2)),
+        sugestao_segura_para_guardar_na_reserva_agora: Number(margemParaReserva.toFixed(2)),
+        gastos_por_categoria_no_mes: gastosPorCategoria,
+        contas_pendentes_detalhadas: contasPendentesLista,
+        ultimas_transacoes: ultimasTransacoes
+      },
+      produtividade: {
+        compromissos_agenda: compromissosProximos,
+        tarefas_inbox_pendentes: tarefasPendentes,
+        quadro_kanban: projetosKanban
+      },
+      saude_fitness: {
+        total_treinos_registrados: treinosMes,
+        ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null
+      }
+    };
+  };
+
+  const gerarContextoDinâmico = () => {
+    const relatorio = gerarRelatorioExecutivo();
+    return JSON.stringify(relatorio, null, 2);
+  };
+
+  // Helper para encontrar um item tanto pelo ID quanto pelo Título (caso a IA passe o nome por voz)
+  const resolverIdPorNomeOuId = (lista, idOuTexto, campoTexto = 'title') => {
+    if (!idOuTexto) return null;
+    const alvoStr = String(idOuTexto).toLowerCase().trim();
     
-    return `
-      Data Atual: ${dataHojeExata} | Hora: ${horaAtualExata}
-      Saldo: R$ ${saldo.toFixed(2)}
-      Finanças: ${JSON.stringify(transacoes)}
-      Agenda: ${JSON.stringify(compromissos)}
-    `;
+    // 1. Tenta bater o ID exato
+    const porId = lista.find(item => String(item.id) === String(idOuTexto));
+    if (porId) return porId.id;
+
+    // 2. Tenta bater por substring no título/descrição
+    const porNome = lista.find(item => 
+      (item[campoTexto] || '').toLowerCase().includes(alvoStr)
+    );
+    return porNome ? porNome.id : idOuTexto;
   };
 
   const exibirMensagem = (texto) => {
@@ -75,6 +221,9 @@ export default function BarraComandoIA() {
     setIsIntercomActive(true);
 
     try {
+      // Garante que todos os dados do Supabase estão na memória antes de conectar
+      await hidratarStoresSeNecessario();
+
       audioManagerRef.current = new GerenciadorDeAudio();
       
       const aoCaptarSom = (base64Pcm) => {
@@ -82,8 +231,6 @@ export default function BarraComandoIA() {
       };
 
       const aoDetectarSilencio = () => {
-        // CORREÇÃO: Só avisa o Gemini que você terminou se ele realmente estiver escutando.
-        // Isso impede o loop infinito de "turnComplete" que o deixava calado e travado no laranja.
         if (liveConnectionRef.current && aiStateRef.current === 'listening') {
           liveConnectionRef.current.forcarResposta();
           updateAiState('processing'); 
@@ -113,95 +260,245 @@ export default function BarraComandoIA() {
 
         if (textoLimpo.length > 0) {
           exibirMensagem(textoLimpo);
-          useChatStore.getState().adicionarMemoria(textoLimpo);
+          useChatStore.getState().adicionarMemoria?.(textoLimpo);
         }
       };
 
+      // =========================================================================
+      // ROTEADOR DE FUNÇÕES DA IA (Sincronizado com Supabase e Stores)
+      // =========================================================================
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
         updateAiState('processing'); 
         const { id, name, args } = functionCallInfo;
-        const dataHoje = new Date().toISOString().split('T')[0];
+        const dataHoje = getLocalTodayISO();
 
-        // 1. Resposta Otimista (Agora como um OBJETO REAL para a API não travar)
-        if (name === "registrar_dado" || name === "alterar_dado") {
-           liveConnectionRef.current.enviarRespostaDeFuncao(id, name, { status: "sucesso", detalhe: "Ação aceita pelo banco local." });
-        }
-
-        // 2. Execução de Fundo
         try {
           if (name === "registrar_dado") {
-            // CORREÇÃO: "args.dados" já vem como objeto nativo agora, sem necessidade de JSON.parse quebrado.
-            const dados = args.dados || {}; 
-            
-            switch (args.entidade) {
+            const entidade = (args.entidade || '').toLowerCase().trim();
+            const dados = args.dados || args || {};
+
+            // Normaliza os campos para aceitar qualquer variação que o modelo enviar
+            const tituloFinal = (
+              dados.titulo || dados.title || dados.descricao || 
+              dados.description || dados.modalidade || dados.nome || "Novo Registro"
+            ).trim();
+
+            const valorFinal = Number(
+              dados.valor ?? dados.amount ?? dados.peso ?? dados.duracao ?? 0
+            );
+
+            const dataFinal = dados.data || dados.date || dataHoje;
+            const horaFinal = dados.hora || dados.time || null;
+            const categoriaFinal = dados.categoria || dados.category || null;
+            const statusFinal = dados.status || null;
+
+            switch (entidade) {
               case 'agenda':
-                useAgendaStore.getState().addAgendaItem({ 
-                  title: dados.titulo || dados.title || "Novo Evento", 
-                  date: dados.data || dados.date || dataHoje, 
-                  time: dados.hora || dados.time || null 
+              case 'evento':
+              case 'compromisso': {
+                const novoEvento = await useAgendaStore.getState().addAgendaItem({ 
+                  title: tituloFinal, 
+                  date: dataFinal, 
+                  time: horaFinal,
+                  category: categoriaFinal || 'evento'
                 });
-                exibirMensagem(`📅 Agenda: ${dados.titulo || "Evento Adicionado"}`);
+                exibirMensagem(`📅 Agenda: ${tituloFinal} (${dataFinal})`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "agenda",
+                  registro_criado: novoEvento
+                });
                 break;
-              case 'despesa':
-                useFinanceStore.getState().addTransaction({ amount: Number(dados.valor), description: dados.descricao, type: 'despesa', category: dados.categoria || 'Outros', date: dataHoje, status: 'pago' });
-                exibirMensagem(`💸 Despesa: ${dados.descricao}`);
-                break;
-              case 'receita':
-                useFinanceStore.getState().addTransaction({ amount: Number(dados.valor), description: dados.descricao, type: 'receita', category: dados.categoria || 'Outros', date: dataHoje, status: 'pago' });
-                exibirMensagem(`📈 Receita: ${dados.descricao}`);
-                break;
-              case 'peso':
-                useFitnessStore.getState().addHealthLog('peso', 'Peso Corporal', Number(dados.peso), 'kg');
-                exibirMensagem(`⚖️ Peso: ${dados.peso} kg`);
-                break;
-              case 'treino':
-                useFitnessStore.getState().addHealthLog('treino', dados.modalidade, Number(dados.duracao), 'min');
-                exibirMensagem(`🏋️ Treino: ${dados.modalidade}`);
-                break;
+              }
+
               case 'inbox':
-                useInboxStore.getState().addInboxTask(dados.titulo, dados.data || dataHoje);
-                exibirMensagem(`📥 Inbox: ${dados.titulo}`);
+              case 'tarefa': {
+                const novaTarefa = await useInboxStore.getState().addInboxTask(tituloFinal, dataFinal);
+                exibirMensagem(`📥 Tarefa: ${tituloFinal}`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "inbox",
+                  registro_criado: novaTarefa
+                });
                 break;
+              }
+
               case 'kanban':
-                useKanbanStore.getState().addTask(dados.titulo, dados.status || 'backlog');
-                exibirMensagem(`📋 Kanban: ${dados.titulo}`);
+              case 'projeto': {
+                const colStatus = ['backlog', 'in-progress', 'done'].includes(statusFinal) ? statusFinal : 'backlog';
+                const novoCard = await useKanbanStore.getState().addTask(tituloFinal, colStatus);
+                exibirMensagem(`📋 Kanban: ${tituloFinal}`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "kanban",
+                  registro_criado: novoCard
+                });
                 break;
+              }
+
+              case 'despesa':
+              case 'gasto': {
+                const novaDespesa = await useFinanceStore.getState().addTransaction({ 
+                  amount: valorFinal, 
+                  description: tituloFinal, 
+                  type: 'despesa', 
+                  category: categoriaFinal || 'Outros', 
+                  date: dataFinal, 
+                  status: statusFinal === 'pendente' ? 'pendente' : 'pago' 
+                });
+                exibirMensagem(`💸 Despesa: ${tituloFinal} (R$ ${valorFinal.toFixed(2)})`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "despesa",
+                  registro_criado: novaDespesa,
+                  novo_saldo: useFinanceStore.getState().balance
+                });
+                break;
+              }
+
+              case 'receita':
+              case 'ganho': {
+                const novaReceita = await useFinanceStore.getState().addTransaction({ 
+                  amount: valorFinal, 
+                  description: tituloFinal, 
+                  type: 'receita', 
+                  category: categoriaFinal || 'Outros', 
+                  date: dataFinal, 
+                  status: statusFinal === 'pendente' ? 'pendente' : 'pago' 
+                });
+                exibirMensagem(`📈 Receita: ${tituloFinal} (R$ ${valorFinal.toFixed(2)})`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "receita",
+                  registro_criado: novaReceita,
+                  novo_saldo: useFinanceStore.getState().balance
+                });
+                break;
+              }
+
+              case 'peso': {
+                await useFitnessStore.getState().addHealthLog('peso', 'Peso', valorFinal, 'kg');
+                exibirMensagem(`⚖️ Peso registrado: ${valorFinal} kg`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "peso",
+                  valor_kg: valorFinal
+                });
+                break;
+              }
+
+              case 'treino': {
+                const duracao = valorFinal > 0 ? valorFinal : 50;
+                await useFitnessStore.getState().addHealthLog('treino', tituloFinal, duracao, 'min');
+                exibirMensagem(`🏋️ Treino: ${tituloFinal} (${duracao} min)`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "treino",
+                  treino: tituloFinal
+                });
+                break;
+              }
+
+              case 'medida': {
+                await useFitnessStore.getState().addHealthLog('medida', tituloFinal, valorFinal, 'cm');
+                exibirMensagem(`📏 Medida (${tituloFinal}): ${valorFinal} cm`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  entidade: "medida",
+                  medida: tituloFinal,
+                  valor_cm: valorFinal
+                });
+                break;
+              }
+
+              default: {
+                // Fallback: se o modelo mandar uma entidade desconhecida, salva no Inbox para nunca perder a nota
+                const fallbackTask = await useInboxStore.getState().addInboxTask(tituloFinal, dataFinal);
+                exibirMensagem(`📥 Inbox: ${tituloFinal}`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                  status: "sucesso",
+                  detalhe: "Salvo na Inbox Diária",
+                  registro_criado: fallbackTask
+                });
+              }
             }
           } 
           
           else if (name === "alterar_dado") {
-            if (args.acao === 'concluir') {
-              if (args.entidade === 'inbox') useInboxStore.getState().toggleInboxTask(args.id, false);
-              if (args.entidade === 'agenda') useAgendaStore.getState().toggleItemCompletion(args.id, false);
-              exibirMensagem(`✅ Item concluído`);
-            } else if (args.acao === 'deletar') {
-              if (args.entidade === 'financas') useFinanceStore.getState().deleteTransaction(args.id);
-              if (args.entidade === 'agenda') useAgendaStore.getState().deleteAgendaItem(args.id);
-              if (args.entidade === 'inbox') useInboxStore.getState().deleteInboxTask(args.id);
-              if (args.entidade === 'kanban') useKanbanStore.getState().deleteTask(args.id);
-              exibirMensagem(`🗑️ Registro apagado.`);
+            const acao = (args.acao || '').toLowerCase().trim();
+            const entidade = (args.entidade || '').toLowerCase().trim();
+            const rawId = args.id;
+
+            if (acao === 'concluir') {
+              if (entidade === 'inbox' || entidade === 'tarefa') {
+                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
+                await useInboxStore.getState().toggleInboxTask(targetId, false);
+              } else if (entidade === 'agenda' || entidade === 'evento') {
+                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
+                await useAgendaStore.getState().toggleItemCompletion(targetId, false);
+              } else if (entidade === 'financas' || entidade === 'despesa' || entidade === 'receita') {
+                const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
+                await useFinanceStore.getState().toggleTransactionStatus(targetId);
+              } else if (entidade === 'kanban') {
+                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
+                await useKanbanStore.getState().moveTask(targetId, 'done');
+              }
+              exibirMensagem(`✅ Registro marcado como concluído!`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "concluido" });
+            } 
+            else if (acao === 'deletar' || acao === 'excluir') {
+              if (entidade === 'financas') {
+                const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
+                await useFinanceStore.getState().deleteTransaction(targetId);
+              } else if (entidade === 'agenda') {
+                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
+                await useAgendaStore.getState().deleteAgendaItem(targetId);
+              } else if (entidade === 'inbox') {
+                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
+                await useInboxStore.getState().deleteInboxTask(targetId);
+              } else if (entidade === 'kanban') {
+                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
+                await useKanbanStore.getState().deleteTask(targetId);
+              }
+              exibirMensagem(`🗑️ Registro removido com sucesso.`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "deletado" });
+            }
+            else if (acao === 'atualizar') {
+              const novosDados = args.dados || {};
+              if (entidade === 'kanban' && novosDados.status) {
+                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
+                await useKanbanStore.getState().moveTask(targetId, novosDados.status);
+              }
+              exibirMensagem(`🔄 Registro atualizado.`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "atualizado" });
             }
           } 
           
           else if (name === "consultar_dados") {
-             let relatorio = {};
-             
-             if (args.entidade === 'financas') {
-                relatorio = { saldo: useFinanceStore.getState().balance, historico: useFinanceStore.getState().transactions };
-             } 
-             else if (args.entidade === 'agenda') {
-                relatorio = { agenda: useAgendaStore.getState().agendaItems };
-             }
-             else {
-                relatorio = { resumo_geral: gerarContextoDinâmico() }; 
-             }
+            const relatorioCompleto = gerarRelatorioExecutivo();
+            let respostaConsulta = {};
 
-             exibirMensagem(`📊 Lendo banco de dados (${args.entidade})...`);
-             liveConnectionRef.current.enviarRespostaDeFuncao(id, name, relatorio);
+            if (args.entidade === 'financas') {
+              respostaConsulta = relatorioCompleto.resumo_financeiro;
+            } else if (args.entidade === 'agenda' || args.entidade === 'inbox' || args.entidade === 'kanban') {
+              respostaConsulta = relatorioCompleto.produtividade;
+            } else if (args.entidade === 'treino') {
+              respostaConsulta = relatorioCompleto.saude_fitness;
+            } else {
+              respostaConsulta = relatorioCompleto;
+            }
+
+            exibirMensagem(`📊 Analisando dados (${args.entidade || 'geral'})...`);
+            liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, respostaConsulta);
           }
 
         } catch (erro) {
-          console.error("Erro interno ao processar ferramenta:", erro);
+          console.error("[Bastian] Erro ao executar ferramenta:", erro);
+          exibirMensagem(`⚠️ Erro ao processar comando: ${erro.message || 'Falha no banco'}`);
+          liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+            status: "erro",
+            mensagem: erro.message || "Falha ao gravar no banco de dados."
+          });
         }
       };
 
@@ -225,6 +522,7 @@ export default function BarraComandoIA() {
       updateAiState('listening');
 
     } catch (erro) {
+      console.error("[Bastian] Erro crítico ao ligar sistema:", erro);
       desligarSistema();
       alert("Falha crítica no sistema neural.");
     }
