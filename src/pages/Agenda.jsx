@@ -6,7 +6,7 @@ import { useInboxStore } from '../store/useInboxStore';
 import { 
   Calendar as CalendarIcon, CheckSquare, Target, Plus, 
   ChevronLeft, ChevronRight, X, Trash2, Tag, Clock, Eye, 
-  Edit2, ListTodo, Layers, RefreshCw, Search, ArrowRight, ArrowLeft, CheckCircle2
+  Edit2, ListTodo, Layers, RefreshCw, Search, ArrowRight, ArrowLeft, CheckCircle2, Check
 } from 'lucide-react'; 
 import { 
   format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, 
@@ -47,20 +47,27 @@ const sortEventsByTime = (events = []) => {
 export default function Agenda() {
   const { agendaItems, addAgendaItem, updateAgendaItem, deleteAgendaItem, fetchAgendaItems, isLoading: agendaLoading } = useAgendaStore();
   const { transactions, fetchTransactions, toggleTransactionStatus } = useFinanceStore();
-  const { tasks: kanbanTasks, addTask: addKanbanTask, moveTask, fetchKanbanTasks, deleteTask: deleteKanbanTask } = useKanbanStore();
-  const { inboxTasks, addInboxTask, toggleInboxTask, deleteInboxTask, fetchInboxTasks } = useInboxStore();
+  const { tasks: kanbanTasks, addTask: addKanbanTask, updateTask: updateKanbanTask, moveTask, fetchKanbanTasks, deleteTask: deleteKanbanTask } = useKanbanStore();
+  const { inboxTasks, addInboxTask, updateInboxTask, toggleInboxTask, deleteInboxTask, fetchInboxTasks } = useInboxStore();
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState('calendar'); 
   const [calendarMode, setCalendarMode] = useState('month'); 
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ESTADOS DO INBOX E KANBAN INLINE
+  // ESTADOS DE CRIAÇÃO E EDIÇÃO DO INBOX
   const [newInboxTitle, setNewInboxTitle] = useState('');
+  const [editingInboxId, setEditingInboxId] = useState(null);
+  const [editInboxTitle, setEditInboxTitle] = useState('');
+  const [editInboxDate, setEditInboxDate] = useState('');
+
+  // ESTADOS DE CRIAÇÃO E EDIÇÃO DO KANBAN
   const [addingKanbanCol, setAddingKanbanCol] = useState(null);
   const [newKanbanTitle, setNewKanbanTitle] = useState('');
+  const [editingKanbanId, setEditingKanbanId] = useState(null);
+  const [editKanbanTitle, setEditKanbanTitle] = useState('');
 
-  // CONFIRMAÇÃO DE EXCLUSÃO EM 2 TOQUES (Unificado para Evento, Inbox e Kanban)
+  // CONFIRMAÇÃO DE EXCLUSÃO EM 2 TOQUES
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   // ESTADOS DO MODAL DE FORMULÁRIO DE EVENTO
@@ -142,7 +149,7 @@ export default function Agenda() {
   };
 
   // =========================================================================
-  // LÓGICA DO INBOX DIÁRIO E PROGRESSO
+  // LÓGICA DO INBOX DIÁRIO (CRIAÇÃO, EDIÇÃO E PROGRESSO)
   // =========================================================================
   const currentSelectedDateString = format(currentDate, 'yyyy-MM-dd');
   
@@ -167,8 +174,25 @@ export default function Agenda() {
     setNewInboxTitle('');
   };
 
+  const handleStartEditInbox = (task) => {
+    setEditingInboxId(task.id);
+    setEditInboxTitle(task.title || '');
+    setEditInboxDate(task.date || currentSelectedDateString);
+  };
+
+  const handleSaveEditInbox = async (taskId) => {
+    if (!editInboxTitle.trim()) return;
+    if (updateInboxTask) {
+      await updateInboxTask(taskId, {
+        title: editInboxTitle.trim(),
+        date: editInboxDate || currentSelectedDateString
+      });
+    }
+    setEditingInboxId(null);
+  };
+
   // =========================================================================
-  // LÓGICA DO KANBAN (INLINE INPUT + TOUCH MOVE)
+  // LÓGICA DO KANBAN (CRIAÇÃO E EDIÇÃO INLINE + TOUCH MOVE)
   // =========================================================================
   const handleAddKanbanSubmit = (e, columnId) => {
     e.preventDefault();
@@ -182,8 +206,21 @@ export default function Agenda() {
     setAddingKanbanCol(null);
   };
 
+  const handleStartEditKanban = (task) => {
+    setEditingKanbanId(task.id);
+    setEditKanbanTitle(task.title || '');
+  };
+
+  const handleSaveEditKanban = async (taskId) => {
+    if (!editKanbanTitle.trim()) return;
+    if (updateKanbanTask) {
+      await updateKanbanTask(taskId, { title: editKanbanTitle.trim() });
+    }
+    setEditingKanbanId(null);
+  };
+
   // =========================================================================
-  // MOTOR DE SALVAMENTO E EDIÇÃO DE EVENTOS
+  // MOTOR DE SALVAMENTO E EDIÇÃO DE EVENTOS DA AGENDA
   // =========================================================================
   const abrirModalNovoEvento = (defaultDate = currentDate) => {
     setEditingId(null);
@@ -227,8 +264,7 @@ export default function Agenda() {
             safetyCounter++;
           }
           
-          // Salva todas as recorrências em 1 única chamada ao Supabase!
-            await addAgendaItem(batchItems);
+          await addAgendaItem(batchItems);
         } else {
           await addAgendaItem({ ...newItem, title: newItem.title.trim() });
         }
@@ -358,7 +394,6 @@ export default function Agenda() {
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
               {activeTab === 'calendar' ? (
                 <>
-                  {/* Seletor de Modo em Botões (Mais rápido que select) */}
                   <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 w-full sm:w-auto">
                     {[
                       { id: 'month', label: 'Mês' },
@@ -457,7 +492,6 @@ export default function Agenda() {
                         </span>
                       )}
                       
-                      {/* Indicadores em Pontos Coloridos no Mobile */}
                       {calendarMode === 'month' && totalItens > 0 && (
                         <div className="sm:hidden flex items-center gap-0.5 mt-1 mr-0.5">
                           {eventosDoDia.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>}
@@ -518,12 +552,11 @@ export default function Agenda() {
           </div>
         )}
 
-        {/* ================= ABA 2: INBOX DIÁRIO ================= */}
+        {/* ================= ABA 2: INBOX DIÁRIO (COM EDIÇÃO INLINE DE TEXTO E DATA) ================= */}
         {activeTab === 'inbox' && (
           <div className="w-full bg-gradient-to-b from-white/10 to-white/5 border border-white/10 border-t-0 p-5 sm:p-8 rounded-b-2xl sm:rounded-b-3xl backdrop-blur-xl shadow-2xl flex flex-col min-h-[500px] h-[700px]">
             <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
               
-              {/* Barra de Progresso do Dia */}
               {tarefasDoDiaSelecionado.length > 0 && (
                 <div className="mb-5">
                   <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden border border-white/5">
@@ -560,30 +593,105 @@ export default function Agenda() {
                   tarefasDoDiaSelecionado.map(task => {
                     const confirmKey = `inbox-${task.id}`;
                     const isConfirming = confirmDeleteId === confirmKey;
+                    const isEditingThis = editingInboxId === task.id;
 
                     return (
-                      <div key={task.id} className={`group flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 ${task.completed ? 'bg-black/20 border-white/5 opacity-60' : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10 shadow-lg'}`}>
-                        <input 
-                          type="checkbox" 
-                          checked={task.completed} 
-                          onChange={() => toggleInboxTask(task.id, task.completed)}
-                          className="w-5 h-5 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-slate-900 cursor-pointer shrink-0 transition-colors"
-                        />
-                        <span className={`flex-1 text-sm sm:text-base font-medium truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                          {task.title}
-                        </span>
-                        
-                        <button 
-                          onClick={() => triggerSafeDelete(confirmKey, () => deleteInboxTask(task.id))}
-                          className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold ${
-                            isConfirming 
-                              ? 'bg-rose-500 text-white px-3 animate-pulse' 
-                              : 'text-slate-500 hover:text-rose-400 hover:bg-rose-500/10'
-                          }`}
-                        >
-                          <Trash2 size={16} />
-                          {isConfirming && <span>Confirmar?</span>}
-                        </button>
+                      <div 
+                        key={task.id} 
+                        className={`group flex flex-col sm:flex-row sm:items-center gap-3 p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 ${
+                          isEditingThis
+                            ? 'bg-black/50 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+                            : task.completed 
+                              ? 'bg-black/20 border-white/5 opacity-60' 
+                              : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10 shadow-lg'
+                        }`}
+                      >
+                        {isEditingThis ? (
+                          /* MODO EDIÇÃO INLINE DA TAREFA */
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editInboxTitle}
+                              onChange={(e) => setEditInboxTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditInbox(task.id);
+                                if (e.key === 'Escape') setEditingInboxId(null);
+                              }}
+                              className="flex-1 bg-black/60 border border-cyan-500/40 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                              placeholder="Título da tarefa..."
+                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="date"
+                                value={editInboxDate}
+                                onChange={(e) => setEditInboxDate(e.target.value)}
+                                className="bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 [color-scheme:dark]"
+                                title="Reagendar data da tarefa"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEditInbox(task.id)}
+                                className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0"
+                              >
+                                <Check size={15} /> Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingInboxId(null)}
+                                className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl shrink-0"
+                                title="Cancelar"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* MODO VISUALIZAÇÃO PADRÃO */
+                          <>
+                            <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                              <input 
+                                type="checkbox" 
+                                checked={task.completed} 
+                                onChange={() => toggleInboxTask(task.id, task.completed)}
+                                className="w-5 h-5 rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-slate-900 cursor-pointer shrink-0 transition-colors"
+                              />
+                              <span 
+                                onDoubleClick={() => handleStartEditInbox(task)}
+                                title="Duplo clique para editar"
+                                className={`flex-1 text-sm sm:text-base font-medium truncate cursor-pointer ${
+                                  task.completed ? 'line-through text-slate-500' : 'text-slate-200'
+                                }`}
+                              >
+                                {task.title}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center justify-end gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditInbox(task)}
+                                title="Editar Tarefa"
+                                className="p-2 rounded-xl text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => triggerSafeDelete(confirmKey, () => deleteInboxTask(task.id))}
+                                className={`p-2 rounded-xl transition-all flex items-center gap-1 text-xs font-bold ${
+                                  isConfirming 
+                                    ? 'bg-rose-500 text-white px-3 animate-pulse' 
+                                    : 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
+                                }`}
+                                title="Excluir Tarefa"
+                              >
+                                <Trash2 size={16} />
+                                {isConfirming && <span>Confirmar?</span>}
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })
@@ -593,7 +701,7 @@ export default function Agenda() {
           </div>
         )}
 
-        {/* ================= ABA 3: KANBAN (COM SUPORTE TOUCH E ADIÇÃO INLINE) ================= */}
+        {/* ================= ABA 3: KANBAN (COM EDIÇÃO INLINE + TOUCH MOVE) ================= */}
         {activeTab === 'projects' && (
           <div className="h-[720px] flex gap-5 sm:gap-6 overflow-x-auto pb-4 custom-scrollbar snap-x snap-mandatory mt-2">
             {KANBAN_COLUMNS.map((column) => {
@@ -626,60 +734,110 @@ export default function Agenda() {
                     {colTasks.map(task => {
                       const confirmKey = `kb-${task.id}`;
                       const isConfirming = confirmDeleteId === confirmKey;
+                      const isEditingCard = editingKanbanId === task.id;
 
                       return (
                         <div 
                           key={task.id}
-                          draggable
-                          onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)}
-                          className="bg-black/40 border border-white/10 p-4 rounded-2xl shadow-lg cursor-grab active:cursor-grabbing hover:border-white/20 hover:bg-white/5 transition-all group flex flex-col gap-3"
+                          draggable={!isEditingCard}
+                          onDragStart={(e) => !isEditingCard && e.dataTransfer.setData('taskId', task.id)}
+                          className={`bg-black/40 border p-4 rounded-2xl shadow-lg transition-all flex flex-col gap-3 ${
+                            isEditingCard 
+                              ? 'border-cyan-500/50' 
+                              : 'border-white/10 cursor-grab active:cursor-grabbing hover:border-white/20 hover:bg-white/5'
+                          }`}
                         >
-                          <div className="flex justify-between items-start gap-2">
-                            <h4 className="text-slate-200 text-sm font-bold leading-relaxed break-words flex-1">
-                              {task.title}
-                            </h4>
-                            <button 
-                              onClick={() => triggerSafeDelete(confirmKey, () => deleteKanbanTask(task.id))}
-                              className={`p-1.5 rounded-lg transition-all flex items-center gap-1 text-[10px] font-bold shrink-0 ${
-                                isConfirming 
-                                  ? 'bg-rose-500 text-white px-2 animate-pulse' 
-                                  : 'text-slate-500 hover:text-rose-400 hover:bg-rose-500/10'
-                              }`}
-                            >
-                              <Trash2 size={14} />
-                              {isConfirming && <span>Apagar?</span>}
-                            </button>
-                          </div>
+                          {isEditingCard ? (
+                            <div className="flex flex-col gap-2.5">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={editKanbanTitle}
+                                onChange={(e) => setEditKanbanTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEditKanban(task.id);
+                                  if (e.key === 'Escape') setEditingKanbanId(null);
+                                }}
+                                className="w-full bg-black/60 border border-cyan-500/40 rounded-xl p-2.5 text-xs sm:text-sm text-white focus:outline-none"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingKanbanId(null)}
+                                  className="px-3 py-1 rounded-lg text-xs font-bold text-slate-400 hover:text-white bg-white/5"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEditKanban(task.id)}
+                                  className="px-3 py-1 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white flex items-center gap-1"
+                                >
+                                  <Check size={13} /> Salvar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex justify-between items-start gap-2">
+                                <h4 
+                                  onDoubleClick={() => handleStartEditKanban(task)}
+                                  className="text-slate-200 text-sm font-bold leading-relaxed break-words flex-1"
+                                >
+                                  {task.title}
+                                </h4>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditKanban(task)}
+                                    title="Editar Cartão"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    onClick={() => triggerSafeDelete(confirmKey, () => deleteKanbanTask(task.id))}
+                                    className={`p-1.5 rounded-lg transition-all flex items-center gap-1 text-[10px] font-bold ${
+                                      isConfirming 
+                                        ? 'bg-rose-500 text-white px-2 animate-pulse' 
+                                        : 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
+                                    }`}
+                                    title="Excluir Cartão"
+                                  >
+                                    <Trash2 size={14} />
+                                    {isConfirming && <span>Apagar?</span>}
+                                  </button>
+                                </div>
+                              </div>
 
-                          {/* Botões Rápidos de Movimentação (Essencial para Mobile/Tablet) */}
-                          <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-white/5">
-                            {column.prev && (
-                              <button
-                                type="button"
-                                onClick={() => moveTask(task.id, column.prev)}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
-                                title="Voltar etapa"
-                              >
-                                <ArrowLeft size={12} /> Voltar
-                              </button>
-                            )}
-                            {column.next && (
-                              <button
-                                type="button"
-                                onClick={() => moveTask(task.id, column.next)}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/20 text-[10px] font-bold transition-colors"
-                                title="Avançar etapa"
-                              >
-                                Avançar <ArrowRight size={12} />
-                              </button>
-                            )}
-                          </div>
+                              <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-white/5">
+                                {column.prev && (
+                                  <button
+                                    type="button"
+                                    onClick={() => moveTask(task.id, column.prev)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-[10px] font-bold transition-colors"
+                                  >
+                                    <ArrowLeft size={12} /> Voltar
+                                  </button>
+                                )}
+                                {column.next && (
+                                  <button
+                                    type="button"
+                                    onClick={() => moveTask(task.id, column.next)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/20 text-[10px] font-bold transition-colors"
+                                  >
+                                    Avançar <ArrowRight size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Input Inline para Novo Cartão (Substitui o window.prompt) */}
                   {addingKanbanCol === column.id ? (
                     <form onSubmit={(e) => handleAddKanbanSubmit(e, column.id)} className="mt-4 bg-black/40 p-3 rounded-2xl border border-cyan-500/30 space-y-2.5">
                       <input
@@ -811,7 +969,7 @@ export default function Agenda() {
                 )}
               </div>
 
-              {/* Seção 2: Tarefas do Dia */}
+              {/* Seção 2: Tarefas do Dia (Com Edição e Exclusão Direta no Modal) */}
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-3 flex items-center gap-2">
                   <CheckSquare size={14} /> Tarefas do Dia
@@ -820,19 +978,80 @@ export default function Agenda() {
                   <p className="text-xs sm:text-sm text-slate-500 font-medium bg-black/20 p-4 rounded-2xl border border-white/5 text-center">Nenhuma tarefa vinculada a esta data.</p>
                 ) : (
                   <div className="space-y-2">
-                    {(inboxTasks || []).filter(t => t.date === format(selectedDayModal.date, 'yyyy-MM-dd')).map(task => (
-                      <div key={task.id} className="flex items-center gap-3 p-3.5 rounded-2xl bg-white/5 border border-white/10">
-                        <input
-                          type="checkbox"
-                          checked={task.completed}
-                          onChange={() => toggleInboxTask(task.id, task.completed)}
-                          className="w-4 h-4 rounded border-white/20 bg-black/40 text-cyan-500 cursor-pointer"
-                        />
-                        <span className={`text-sm font-medium flex-1 truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                          {task.title}
-                        </span>
-                      </div>
-                    ))}
+                    {(inboxTasks || []).filter(t => t.date === format(selectedDayModal.date, 'yyyy-MM-dd')).map(task => {
+                      const isEditingModalTask = editingInboxId === task.id;
+                      const confirmModalTaskKey = `modal-inbox-${task.id}`;
+                      const isConfirmingModalTask = confirmDeleteId === confirmModalTaskKey;
+
+                      return (
+                        <div key={task.id} className="flex items-center justify-between gap-2 p-3.5 rounded-2xl bg-white/5 border border-white/10">
+                          {isEditingModalTask ? (
+                            <div className="flex items-center gap-2 w-full">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={editInboxTitle}
+                                onChange={(e) => setEditInboxTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEditInbox(task.id);
+                                  if (e.key === 'Escape') setEditingInboxId(null);
+                                }}
+                                className="flex-1 bg-black/60 border border-cyan-500/40 rounded-xl px-3 py-1.5 text-xs sm:text-sm text-white focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEditInbox(task.id)}
+                                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold"
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingInboxId(null)}
+                                className="p-1.5 bg-white/5 text-slate-400 hover:text-white rounded-xl"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <input
+                                  type="checkbox"
+                                  checked={task.completed}
+                                  onChange={() => toggleInboxTask(task.id, task.completed)}
+                                  className="w-4 h-4 rounded border-white/20 bg-black/40 text-cyan-500 cursor-pointer shrink-0"
+                                />
+                                <span className={`text-sm font-medium truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                  {task.title}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditInbox(task)}
+                                  className="p-1.5 text-slate-400 hover:text-cyan-400 rounded-lg hover:bg-white/10 transition-colors"
+                                  title="Editar Tarefa"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => triggerSafeDelete(confirmModalTaskKey, () => deleteInboxTask(task.id))}
+                                  className={`p-1.5 rounded-lg transition-all flex items-center gap-1 text-[10px] font-bold ${
+                                    isConfirmingModalTask ? 'bg-rose-500 text-white px-2' : 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
+                                  }`}
+                                  title="Excluir Tarefa"
+                                >
+                                  <Trash2 size={14} />
+                                  {isConfirmingModalTask && <span>Apagar?</span>}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
