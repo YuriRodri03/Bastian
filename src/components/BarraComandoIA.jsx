@@ -151,6 +151,7 @@ export default function BarraComandoIA() {
 
     const treinosMes = (healthLogs || []).filter(l => l.type === 'treino').length;
     const ultimoPesoObj = (healthLogs || []).find(l => l.type === 'peso');
+    
 
     return {
       data_hoje: dataHoje,
@@ -177,7 +178,9 @@ export default function BarraComandoIA() {
       },
       saude_fitness: {
         total_treinos_registrados: treinosMes,
-        ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null
+        ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null,
+        ultimos_registros_sono: (healthLogs || []).filter(l => l.type === 'sono').slice(0, 7),
+        ultimos_registros_humor: (healthLogs || []).filter(l => l.type === 'humor').slice(0, 7),
       }
     };
   };

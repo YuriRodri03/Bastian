@@ -70,6 +70,8 @@ const resolveDefaultUnit = (type, unit) => {
   if (type === 'peso') return 'kg';
   if (type === 'medida') return 'cm';
   if (type === 'treino') return 'min';
+  if (type === 'sono') return 'h';
+  if (type === 'humor') return '/5';
   return null;
 };
 
