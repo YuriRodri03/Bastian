@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { 
-  Dumbbell, Trash2, Calendar, Scale, Ruler, Filter, Flame, Play, Plus, 
+  Dumbbell, Trash2, Calendar, Scale, Ruler, Flame, Play, Plus, 
   ChevronDown, ChevronUp, Edit3, Check, X, UserCircle, AlertCircle, 
   Timer, RotateCcw, Search, TrendingUp, CheckCircle2
 } from 'lucide-react';
@@ -33,41 +33,19 @@ const playRestBeep = () => {
   }
 };
 
-const DEFAULT_FICHAS = [
-  {
-    id: '1',
-    title: 'Treino A - Empurrar (Peito, Ombro e Tríceps)',
-    exercicios: [
-      { id: '1-1', nome: 'Flexão de Braços / Supino c/ Halteres', series: '4x', reps: '10-12', carga: '10kg' },
-      { id: '1-2', nome: 'Desenvolvimento Militar c/ Halteres', series: '4x', reps: '10-12', carga: '10kg' },
-      { id: '1-3', nome: 'Elevação Lateral', series: '3x', reps: '12-15', carga: '10kg' },
-      { id: '1-4', nome: 'Tríceps Francês / Mergulho no Banco', series: '3x', reps: '12-15', carga: '10kg' }
-    ]
-  },
-  {
-    id: '2',
-    title: 'Treino B - Puxar & Core (Costas, Bíceps e Abdômen)',
-    exercicios: [
-      { id: '2-1', nome: 'Remada Curvada Unilateral (Serrote)', series: '4x', reps: '10-12', carga: '10kg' },
-      { id: '2-2', nome: 'Rosca Direta / Martelo c/ Halteres', series: '4x', reps: '10-12', carga: '10kg' },
-      { id: '2-3', nome: 'Rosca Concentrada', series: '3x', reps: '12', carga: '10kg' },
-      { id: '2-4', nome: 'Corda Naval / Pular Corda (Cardio HIIT)', series: '5x', reps: '1 min', carga: 'Peso Corp.' }
-    ]
-  },
-  {
-    id: '3',
-    title: 'Treino C - Inferiores Completo (Pernas e Glúteos)',
-    exercicios: [
-      { id: '3-1', nome: 'Agachamento Livre / Búlgaro', series: '4x', reps: '10-12', carga: '20kg' },
-      { id: '3-2', nome: 'Elevação Pélvica (Hip Thrust)', series: '4x', reps: '12-15', carga: '20kg' },
-      { id: '3-3', nome: 'Stiff c/ Halteres', series: '3x', reps: '12', carga: '20kg' },
-      { id: '3-4', nome: 'Panturrilha em Pé Unilateral', series: '4x', reps: '15-20', carga: '10kg' }
-    ]
-  }
-];
-
 export default function Treino() {
-  const { healthLogs, addHealthLog, deleteHealthLog, fetchHealthLogs } = useFitnessStore();
+  // Conectado diretamente ao store global (sincronizado em tempo real com o Bastian!)
+  const { 
+    healthLogs, 
+    fichasTreino, 
+    addHealthLog, 
+    deleteHealthLog, 
+    fetchHealthLogs,
+    addFichaTreino,
+    updateFichaTreino,
+    deleteFichaTreino,
+    concluirFichaTreino
+  } = useFitnessStore();
   
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -121,20 +99,8 @@ export default function Treino() {
   // =========================================================================
   // 2. GESTÃO DE FICHAS DE TREINO E EXECUÇÃO INTERATIVA
   // =========================================================================
-  const [fichasTreino, setFichasTreino] = useState(() => {
-    const saved = localStorage.getItem('centro_comando_fichas');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { console.error(e); }
-    }
-    return DEFAULT_FICHAS;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('centro_comando_fichas', JSON.stringify(fichasTreino));
-  }, [fichasTreino]);
-
   const [expandedFichaId, setExpandedFichaId] = useState(null);
-  const [checkedExercises, setCheckedExercises] = useState({}); // { '1-1': true }
+  const [checkedExercises, setCheckedExercises] = useState({});
   const [workoutDuration, setWorkoutDuration] = useState('50');
 
   const [isCreatingFicha, setIsCreatingFicha] = useState(false);
@@ -155,21 +121,21 @@ export default function Treino() {
   };
 
   const handleConcluirTreino = async (ficha) => {
-    const resumoExercicios = ficha.exercicios
-      .map(e => `${e.nome} (${e.series} ${e.reps} - ${e.carga})`)
-      .join(' • ');
-    const duracaoNum = parseInt(workoutDuration, 10) || 50;
+    try {
+      const duracaoNum = parseInt(workoutDuration, 10) || 50;
+      await concluirFichaTreino(ficha.id, duracaoNum);
+      
+      // Limpa os checks desta ficha após concluir
+      const resetChecks = { ...checkedExercises };
+      ficha.exercicios.forEach((ex, i) => {
+        delete resetChecks[`${ficha.id}-${ex.id || i}`];
+      });
+      setCheckedExercises(resetChecks);
 
-    await addHealthLog('treino', `${ficha.title}: ${resumoExercicios}`, duracaoNum, 'min');
-    
-    // Limpa os checks desta ficha após concluir
-    const resetChecks = { ...checkedExercises };
-    ficha.exercicios.forEach((ex, i) => {
-      delete resetChecks[`${ficha.id}-${ex.id || i}`];
-    });
-    setCheckedExercises(resetChecks);
-
-    showToast(`Treino "${ficha.title}" registrado (${duracaoNum} min)!`, 'success');
+      showToast(`Treino "${ficha.title}" registrado (${duracaoNum} min)!`, 'success');
+    } catch (err) {
+      showToast('Erro ao registrar treino no banco.', 'error');
+    }
   };
 
   const handleAddExercicioTemp = () => {
@@ -193,13 +159,11 @@ export default function Treino() {
       showToast('Adicione um título e ao menos um exercício.', 'error');
       return;
     }
-    setFichasTreino([
-      ...fichasTreino, 
-      { id: Date.now().toString(), title: novaFichaTitulo.trim(), exercicios: exerciciosTemp }
-    ]);
+    const nova = addFichaTreino(novaFichaTitulo.trim(), exerciciosTemp);
     setNovaFichaTitulo('');
     setExerciciosTemp([]);
     setIsCreatingFicha(false);
+    setExpandedFichaId(nova.id);
     showToast('Nova ficha criada com sucesso!', 'success');
   };
 
@@ -207,7 +171,7 @@ export default function Treino() {
   const handleStartEdit = (ficha) => {
     setEditingFichaId(ficha.id);
     setEditFichaTitulo(ficha.title);
-    setEditExercicios(ficha.exercicios.map(ex => ({ ...ex })));
+    setEditExercicios((ficha.exercicios || []).map(ex => ({ ...ex })));
     setExpandedFichaId(ficha.id);
   };
 
@@ -218,18 +182,16 @@ export default function Treino() {
       return;
     }
 
-    setFichasTreino(fichasTreino.map(f => {
-      if (f.id === id) {
-        return { ...f, title: editFichaTitulo.trim(), exercicios: cleanExercises };
-      }
-      return f;
-    }));
+    updateFichaTreino(id, {
+      title: editFichaTitulo.trim(),
+      exercicios: cleanExercises
+    });
     setEditingFichaId(null);
     showToast('Ficha atualizada com sucesso!', 'success');
   };
 
   const handleDeleteFicha = (id) => {
-    setFichasTreino(fichasTreino.filter(f => f.id !== id));
+    deleteFichaTreino(id);
     showToast('Ficha excluída.', 'success');
   };
 
@@ -262,10 +224,14 @@ export default function Treino() {
     const numValue = parseFloat(String(data.valor).replace(',', '.'));
     if (isNaN(numValue) || numValue <= 0) return;
 
-    const tipoRegistro = medidaNome === 'Peso' ? 'peso' : 'medida';
-    await addHealthLog(tipoRegistro, medidaNome, numValue, data.unidade);
-    handleMedidaChange(medidaNome, '');
-    showToast(`${medidaNome} registrado: ${numValue}${data.unidade}!`, 'success');
+    try {
+      const tipoRegistro = medidaNome === 'Peso' ? 'peso' : 'medida';
+      await addHealthLog(tipoRegistro, medidaNome, numValue, data.unidade);
+      handleMedidaChange(medidaNome, '');
+      showToast(`${medidaNome} registrado: ${numValue}${data.unidade}!`, 'success');
+    } catch (err) {
+      showToast('Erro ao salvar medida no banco.', 'error');
+    }
   };
 
   // Histórico e Filtros
@@ -435,7 +401,7 @@ export default function Treino() {
           <div className="bg-gradient-to-b from-white/10 to-white/5 border border-white/10 p-5 sm:p-6 rounded-3xl backdrop-blur-xl shadow-2xl">
             <div className="flex justify-between items-center mb-5 border-b border-white/10 pb-4">
               <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                <Dumbbell size={18} className="text-cyan-400" /> Minhas Fichas
+                <Dumbbell size={18} className="text-cyan-400" /> Minhas Fichas ({fichasTreino.length})
               </h2>
               <button 
                 onClick={() => setIsCreatingFicha(!isCreatingFicha)}
@@ -518,8 +484,9 @@ export default function Treino() {
                 const confirmFichaKey = `ficha-${ficha.id}`;
                 const isConfirmingDelete = confirmDeleteId === confirmFichaKey;
 
-                const doneCount = ficha.exercicios.filter((ex, idx) => checkedExercises[`${ficha.id}-${ex.id || idx}`]).length;
-                const totalEx = ficha.exercicios.length;
+                const exerciciosDaFicha = ficha.exercicios || [];
+                const doneCount = exerciciosDaFicha.filter((ex, idx) => checkedExercises[`${ficha.id}-${ex.id || idx}`]).length;
+                const totalEx = exerciciosDaFicha.length;
 
                 return (
                   <div key={ficha.id} className={`bg-black/30 border rounded-2xl transition-all duration-200 ${isExpanded ? 'border-cyan-500/40 shadow-lg shadow-cyan-500/5' : 'border-white/10 hover:border-white/20'}`}>
@@ -612,7 +579,7 @@ export default function Treino() {
                             <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-1">
                               Toque nos exercícios para marcar seu progresso na sessão:
                             </p>
-                            {ficha.exercicios.map((ex, i) => {
+                            {exerciciosDaFicha.map((ex, i) => {
                               const checkKey = `${ficha.id}-${ex.id || i}`;
                               const isDone = Boolean(checkedExercises[checkKey]);
 

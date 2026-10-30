@@ -49,30 +49,32 @@ export class GeminiLiveConnection {
         systemInstruction: {
           parts: [
             {
-              text: `Você é Bastian, o assistente executivo, estrategista de produtividade e consultor financeiro pessoal de Yuri Rodrigues (mestrando em economia no CAEN/UFC e desenvolvedor full-stack).
+              text: `Você é Bastian, o assistente executivo, estrategista de produtividade, consultor financeiro e treinador de performance pessoal de Yuri Rodrigues (mestrando em economia no CAEN/UFC e desenvolvedor full-stack).
 
 [CONTEXTO DE ESPAÇO-TEMPO]
 Localização: Fortaleza, CE.
 Data e hora exata: ${horaLocal} (Data ISO de Hoje: ${dataIsoHoje} | Fuso: ${fusoLocal}).
-Sempre use ${dataIsoHoje} como referência para calcular "hoje", "amanhã" ou dias da semana.
 
 [SNAPSHOT ATUAL DO SISTEMA DO YURI]
 ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados atualizados."}
 
-[COMO AGIR E OPINAR (MUITO IMPORTANTE)]
-1. PAPEL CONSULTIVO E OPINIÃO ANALÍTICA:
-   - Você NÃO é apenas um gravador de comandos. Quando o Yuri pedir sua opinião, análise ou conselho (ex: "quanto posso guardar na reserva?", "como está minha semana?", "estou gastando muito?", "qual o melhor dia para estudar?"), NUNCA diga que não tem função para isso!
-   - Para responder perguntas analíticas: chame a ferramenta 'consultar_dados' (ou analise o SNAPSHOT acima), calcule a diferença entre Receitas, Despesas Pagas e Contas Pendentes, observe os compromissos da agenda e dê uma recomendação inteligente, prática e direta (sugerindo valores exatos para aporte/reserva de emergência ou ajustes de rotina).
-2. CRIAÇÃO DE TAREFAS, EVENTOS E FINANÇAS:
-   - Sempre que o Yuri pedir para anotar, agendar, lembrar ou criar uma tarefa/compromisso/gasto, chame IMEDIATAMENTE a ferramenta 'registrar_dado'.
-   - Diferencie bem:
-     * 'inbox': Tarefas do dia a dia ou afazeres sem hora marcada (ex: "lembrar de enviar e-mail", "estudar microeconomia hoje").
-     * 'agenda': Compromissos ou aulas com data e/ou horário (ex: "reunião amanhã às 14h", "seminário dia 15").
-     * 'kanban': Projetos maiores ou tarefas de desenvolvimento/pesquisa (colunas: 'backlog', 'in-progress', 'done').
-     * 'despesa' / 'receita': Movimentações financeiras (se for investimento, use a categoria 'Aporte de Investimento' ou 'Resgate de Investimento').
-3. TOM DE VOZ:
-   - Fale em Português do Brasil, com tom inteligente, parceiro, executivo e direto ao ponto.
-   - Seja conciso na fala (2 a 4 frases), sem ler listas gigantescas item por item, mas entregando os números-chave e sua conclusão.`
+[DIRETRIZES DE ATUAÇÃO]
+1. CONSULTORIA FINANCEIRA E PRODUTIVIDADE:
+   - Quando o Yuri pedir sua opinião ou análise (ex: "quanto posso guardar na reserva?", "como está minha semana?", "analise meus treinos"), NUNCA diga que não tem função para isso!
+   - Analise os números do SNAPSHOT (ou chame 'consultar_dados') e dê recomendações precisas com valores e estratégia.
+2. GESTÃO COMPLETA DE TREINOS, FICHAS E BIOMETRIA (FITNESS):
+   - Você tem controle total sobre a página de Treinos do Yuri!
+   - Quando o Yuri pedir para CRIAR ou MONTAR um treino/ficha (ex: "cria um treino de pernas", "monta uma ficha de peito e ombro", "cria um treino para hoje"), chame IMEDIATAMENTE a ferramenta 'registrar_dado' com entidade: 'ficha_treino', passando o 'titulo' da ficha e o array 'exercicios' (cada exercício com 'nome', 'series', 'reps', 'carga').
+   - Contexto de treino do Yuri: caso ele não especifique equipamentos de academia, lembre-se que ele treina em casa focado em hipertrofia e calistenia (30-45 min), dispondo de 2 halteres de 10kg (total 20kg), peso corporal e corda de pular. Monte fichas inteligentes e intensas!
+   - Se ele disser que JÁ TREINOU ou CONCLUIU uma ficha/treino hoje (ex: "concluí o Treino A", "registra que treinei costas por 45 min"), use 'registrar_dado' com entidade: 'treino' (ou 'alterar_dado' com acao: 'concluir' e entidade: 'ficha_treino').
+   - Para peso corporal use entidade: 'peso'. Para medidas (Bíceps Dir., Bíceps Esq., Peitoral, Cintura, Coxa Dir., Coxa Esq.) use entidade: 'medida'.
+3. TAREFAS, AGENDA E FINANÇAS:
+   - 'inbox': Tarefas do dia a dia.
+   - 'agenda': Compromissos com data e/ou hora.
+   - 'kanban': Projetos ('backlog', 'in-progress', 'done').
+   - 'despesa' / 'receita': Lançamentos financeiros.
+4. TOM DE VOZ:
+   - Português do Brasil, inteligente, parceiro, direto e conciso (2 a 4 frases na fala).`
             }
           ]
         },
@@ -82,41 +84,55 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
             functionDeclarations: [
               {
                 name: "registrar_dado",
-                description: "Cria e salva qualquer novo registro no sistema: tarefa (inbox), compromisso (agenda), cartão de projeto (kanban), receita, despesa, treino ou peso.",
+                description: "Cria e salva qualquer novo registro no sistema: ficha de treino completa (ficha_treino), treino concluído (treino), peso corporal (peso), medida corporal (medida), tarefa (inbox), compromisso (agenda), projeto (kanban), receita ou despesa.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
                     entidade: {
                       type: "STRING",
-                      description: "Valores permitidos: 'inbox', 'agenda', 'kanban', 'despesa', 'receita', 'treino', 'peso', 'medida'."
+                      description: "Valores permitidos: 'ficha_treino', 'treino', 'peso', 'medida', 'inbox', 'agenda', 'kanban', 'despesa', 'receita'."
                     },
                     dados: {
                       type: "OBJECT",
-                      description: "Dados estruturados do item a ser salvo.",
+                      description: "Dados estruturados do registro.",
                       properties: {
                         titulo: {
                           type: "STRING",
-                          description: "Título ou descrição da tarefa, evento, cartão kanban, treino ou transação financeira."
+                          description: "Título da ficha de treino (ex: 'Treino D - Full Body'), nome da medida (ex: 'Peitoral', 'Bíceps Dir.', 'Cintura'), modalidade do treino, ou descrição da tarefa/evento/finança."
                         },
                         valor: {
                           type: "NUMBER",
-                          description: "Valor numérico em Reais (para receita/despesa), kg (para peso), cm (para medida) ou minutos (para treino)."
+                          description: "Valor numérico: Reais (para receita/despesa), kg (para peso), cm (para medida) ou minutos de duração (para treino concluído)."
                         },
                         data: {
                           type: "STRING",
-                          description: "Data no formato YYYY-MM-DD (ex: '2026-10-29'). Se o usuário disser 'hoje', use a data ISO de hoje."
+                          description: "Data no formato YYYY-MM-DD."
                         },
                         hora: {
                           type: "STRING",
-                          description: "Horário no formato HH:MM (ex: '14:30') para itens da 'agenda'."
+                          description: "Horário no formato HH:MM (para agenda)."
                         },
                         categoria: {
                           type: "STRING",
-                          description: "Para agenda: 'evento', 'aula', 'reuniao', 'tarefa', 'saude', 'financeiro', 'lazer', 'lembrete'. Para finanças: 'Moradia', 'Mercado', 'Alimentação Fora', 'Transporte', 'Contas Fixas', 'Saúde', 'Educação', 'Assinaturas', 'Lazer', 'Cartão de Crédito', 'Aporte de Investimento', 'Salário', 'Bolsa/Auxílio', 'Freelance', 'Outros'."
+                          description: "Categoria do evento na agenda ou da transação financeira."
                         },
                         status: {
                           type: "STRING",
                           description: "Para finanças: 'pago' ou 'pendente'. Para kanban: 'backlog', 'in-progress' ou 'done'."
+                        },
+                        exercicios: {
+                          type: "ARRAY",
+                          description: "Obrigatório quando entidade for 'ficha_treino'. Lista de exercícios que compõem a ficha.",
+                          items: {
+                            type: "OBJECT",
+                            properties: {
+                              nome: { type: "STRING", description: "Nome do exercício (ex: 'Flexão Diamante', 'Desenvolvimento c/ Halteres')." },
+                              series: { type: "STRING", description: "Número de séries (ex: '4x', '3x')." },
+                              reps: { type: "STRING", description: "Repetições ou tempo (ex: '10-12', '15', '1 min')." },
+                              carga: { type: "STRING", description: "Carga utilizada (ex: '10kg', '20kg', 'Peso Corp.')." }
+                            },
+                            required: ["nome", "series", "reps", "carga"]
+                          }
                         }
                       },
                       required: ["titulo"]
@@ -127,7 +143,7 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
               },
               {
                 name: "alterar_dado",
-                description: "Conclui (dá baixa), atualiza ou deleta um item existente na inbox, agenda, financas ou kanban.",
+                description: "Conclui (dá baixa em tarefa, conta ou ficha de treino), atualiza (edita ficha de treino, kanban, etc.) ou deleta qualquer registro existente.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
@@ -137,15 +153,15 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
                     },
                     entidade: {
                       type: "STRING",
-                      description: "Valores permitidos: 'inbox', 'agenda', 'financas', 'kanban'."
+                      description: "Valores permitidos: 'ficha_treino', 'treino', 'peso', 'medida', 'inbox', 'agenda', 'financas', 'kanban'."
                     },
                     id: {
                       type: "STRING",
-                      description: "ID do item (ou parte do título caso o ID não seja conhecido)."
+                      description: "ID exato ou nome/título do item (ex: 'Treino A', 'Aluguel')."
                     },
                     dados: {
                       type: "OBJECT",
-                      description: "Campos opcionais para atualizar (titulo, valor, data, hora, status, categoria)."
+                      description: "Novos dados para atualização (ex: { titulo, valor, status, exercicios })."
                     }
                   },
                   required: ["acao", "entidade", "id"]
@@ -153,13 +169,13 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
               },
               {
                 name: "consultar_dados",
-                description: "Lê os dados atualizados de finanças, saldo, contas a pagar, agenda de compromissos, tarefas da inbox ou kanban para responder perguntas ou dar conselhos/opiniões ao usuário.",
+                description: "Consulta dados atualizados de finanças, agenda, inbox, kanban ou treino (incluindo fichas de treino, histórico de treinos, peso e medidas).",
                 parameters: {
                   type: "OBJECT",
                   properties: {
                     entidade: {
                       type: "STRING",
-                      description: "Qual módulo consultar: 'financas', 'agenda', 'inbox', 'kanban', 'treino', 'geral'."
+                      description: "Qual módulo consultar: 'treino', 'financas', 'agenda', 'inbox', 'kanban', 'geral'."
                     }
                   },
                   required: ["entidade"]
@@ -222,10 +238,8 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
     }
   }
 
-  // Envia o retorno da execução da ferramenta de volta para o Gemini continuar a fala
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultadoObj) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      // Garante que response seja sempre um objeto JSON válido com a chave result
       const safeResponse =
         resultadoObj && typeof resultadoObj === "object" && !Array.isArray(resultadoObj)
           ? resultadoObj
@@ -255,7 +269,6 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
           return;
         }
 
-        // 1. CAPTURA DE TEXTO E ÁUDIO DO MODELO
         if (resposta.serverContent && resposta.serverContent.modelTurn) {
           const partes = resposta.serverContent.modelTurn.parts || [];
           partes.forEach((parte) => {
@@ -265,14 +278,12 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
             if (parte.text) {
               this.onTextChunk(parte.text);
             }
-            // Fallback caso venha inline dentro de parts
             if (parte.functionCall) {
               this.onFunctionCall(parte.functionCall);
             }
           });
         }
 
-        // 2. CAPTURA OFICIAL DE TOOL CALL DA API GEMINI LIVE (Fora de serverContent!)
         if (resposta.toolCall && Array.isArray(resposta.toolCall.functionCalls)) {
           resposta.toolCall.functionCalls.forEach((fnCall) => {
             console.log("[Bastian Core] ToolCall recebida:", fnCall.name, fnCall.args);
