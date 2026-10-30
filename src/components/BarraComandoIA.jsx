@@ -12,7 +12,6 @@ import { useKanbanStore } from '../store/useKanbanStore';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { useChatStore } from '../store/useChatStore'; 
 
-// Data local exata (evita virar o dia às 21h por causa do UTC)
 const getLocalTodayISO = () => {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -48,7 +47,6 @@ export default function BarraComandoIA() {
     return texto.replace(/[*_~`#>-]/g, '').trim();
   };
 
-  // Garante que todos os stores tenham dados carregados do Supabase antes de montar o contexto
   const hidratarStoresSeNecessario = async () => {
     const promises = [];
     if (useFinanceStore.getState().transactions.length === 0) {
@@ -71,21 +69,17 @@ export default function BarraComandoIA() {
     }
   };
 
-  // =========================================================================
-  // MOTOR DE CONTEXTO E RAIO-X FINANCEIRO/PRODUTIVIDADE PARA O BASTIAN OPINAR
-  // =========================================================================
   const gerarRelatorioExecutivo = () => {
     const dataHoje = getLocalTodayISO();
-    const mesAtualPrefix = dataHoje.substring(0, 7); // 'YYYY-MM'
+    const mesAtualPrefix = dataHoje.substring(0, 7);
     const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
     const { transactions, balance, investedBalance } = useFinanceStore.getState();
     const { agendaItems } = useAgendaStore.getState();
     const { inboxTasks } = useInboxStore.getState();
     const { tasks: kanbanTasks } = useKanbanStore.getState();
-    const { healthLogs } = useFitnessStore.getState();
+    const { healthLogs, fichasTreino } = useFitnessStore.getState();
 
-    // Cálculos do Mês Atual para o Bastian não precisar somar de cabeça
     let receitasPagasMes = 0;
     let despesasOperacionaisPagasMes = 0;
     let contasAPagarMes = 0;
@@ -123,17 +117,12 @@ export default function BarraComandoIA() {
 
     const balancoLiquidoMes = receitasPagasMes - despesasOperacionaisPagasMes;
     const saldoProjetadoFimDoMes = balance + contasAReceberMes - contasAPagarMes;
-    // Margem segura sugerida para guardar na reserva (ex: mantendo um colchão de R$ 300 em conta corrente)
     const margemParaReserva = Math.max(0, saldoProjetadoFimDoMes - 300);
 
     const contasPendentesLista = transactions
       .filter(t => (t.status || 'pago') === 'pendente')
       .slice(0, 12)
       .map(t => ({ id: t.id, descricao: t.description.split(' [')[0], valor: t.amount, vencimento: t.date, tipo: t.type }));
-
-    const ultimasTransacoes = transactions
-      .slice(0, 15)
-      .map(t => ({ id: t.id, descricao: t.description.split(' [')[0], valor: t.amount, categoria: t.category, tipo: t.type, data: t.date, status: t.status }));
 
     const compromissosProximos = agendaItems
       .filter(e => !e.is_completed && e.date >= dataHoje)
@@ -149,9 +138,14 @@ export default function BarraComandoIA() {
       .slice(0, 12)
       .map(k => ({ id: k.id, titulo: k.title, coluna: k.status }));
 
-    const treinosMes = (healthLogs || []).filter(l => l.type === 'treino').length;
+    const treinosRealizados = (healthLogs || []).filter(l => l.type === 'treino');
     const ultimoPesoObj = (healthLogs || []).find(l => l.type === 'peso');
-    
+    const ultimasMedidas = {};
+    (healthLogs || [])
+      .filter(l => l.type === 'medida')
+      .forEach(m => {
+        if (!ultimasMedidas[m.title]) ultimasMedidas[m.title] = `${m.value}${m.unit || 'cm'}`;
+      });
 
     return {
       data_hoje: dataHoje,
@@ -164,12 +158,10 @@ export default function BarraComandoIA() {
         aportes_investidos_no_mes: Number(aportesMes.toFixed(2)),
         balanco_operacional_do_mes: Number(balancoLiquidoMes.toFixed(2)),
         contas_pendentes_a_pagar_no_mes: Number(contasAPagarMes.toFixed(2)),
-        valores_pendentes_a_receber_no_mes: Number(contasAReceberMes.toFixed(2)),
         saldo_projetado_apos_pagar_pendencias: Number(saldoProjetadoFimDoMes.toFixed(2)),
         sugestao_segura_para_guardar_na_reserva_agora: Number(margemParaReserva.toFixed(2)),
         gastos_por_categoria_no_mes: gastosPorCategoria,
-        contas_pendentes_detalhadas: contasPendentesLista,
-        ultimas_transacoes: ultimasTransacoes
+        contas_pendentes_detalhadas: contasPendentesLista
       },
       produtividade: {
         compromissos_agenda: compromissosProximos,
@@ -177,32 +169,26 @@ export default function BarraComandoIA() {
         quadro_kanban: projetosKanban
       },
       saude_fitness: {
-        total_treinos_registrados: treinosMes,
+        fichas_de_treino_atuais: fichasTreino,
+        total_treinos_concluidos: treinosRealizados.length,
         ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null,
-        ultimos_registros_sono: (healthLogs || []).filter(l => l.type === 'sono').slice(0, 7),
-        ultimos_registros_humor: (healthLogs || []).filter(l => l.type === 'humor').slice(0, 7),
+        medidas_corporais_atuais: ultimasMedidas,
+        ultimos_registros_sono: (healthLogs || []).filter(l => l.type === 'sono').slice(0, 5),
+        ultimos_registros_humor: (healthLogs || []).filter(l => l.type === 'humor').slice(0, 5)
       }
     };
   };
 
   const gerarContextoDinâmico = () => {
-    const relatorio = gerarRelatorioExecutivo();
-    return JSON.stringify(relatorio, null, 2);
+    return JSON.stringify(gerarRelatorioExecutivo(), null, 2);
   };
 
-  // Helper para encontrar um item tanto pelo ID quanto pelo Título (caso a IA passe o nome por voz)
   const resolverIdPorNomeOuId = (lista, idOuTexto, campoTexto = 'title') => {
     if (!idOuTexto) return null;
     const alvoStr = String(idOuTexto).toLowerCase().trim();
-    
-    // 1. Tenta bater o ID exato
     const porId = lista.find(item => String(item.id) === String(idOuTexto));
     if (porId) return porId.id;
-
-    // 2. Tenta bater por substring no título/descrição
-    const porNome = lista.find(item => 
-      (item[campoTexto] || '').toLowerCase().includes(alvoStr)
-    );
+    const porNome = lista.find(item => (item[campoTexto] || '').toLowerCase().includes(alvoStr));
     return porNome ? porNome.id : idOuTexto;
   };
 
@@ -224,7 +210,6 @@ export default function BarraComandoIA() {
     setIsIntercomActive(true);
 
     try {
-      // Garante que todos os dados do Supabase estão na memória antes de conectar
       await hidratarStoresSeNecessario();
 
       audioManagerRef.current = new GerenciadorDeAudio();
@@ -268,7 +253,7 @@ export default function BarraComandoIA() {
       };
 
       // =========================================================================
-      // ROTEADOR DE FUNÇÕES DA IA (Sincronizado com Supabase e Stores)
+      // ROTEADOR DE FUNÇÕES DA IA
       // =========================================================================
       const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
         updateAiState('processing'); 
@@ -276,11 +261,62 @@ export default function BarraComandoIA() {
         const dataHoje = getLocalTodayISO();
 
         try {
+          // 1. FERRAMENTA DEDICADA DE FICHAS DE TREINO
+          if (name === "gerenciar_ficha_treino") {
+            const acao = (args.acao || 'criar').toLowerCase().trim();
+            const titulo = (args.titulo || 'Nova Ficha de Treino').trim();
+            const exercicios = Array.isArray(args.exercicios) ? args.exercicios : [];
+
+            if (acao === 'criar') {
+              const novaFicha = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
+              exibirMensagem(`💪 Ficha criada: ${novaFicha.title} (${novaFicha.exercicios.length} exercícios)`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                status: "sucesso",
+                acao: "ficha_criada_na_aba_treinos",
+                ficha: novaFicha
+              });
+            } 
+            else if (acao === 'substituir_todas') {
+              useFitnessStore.getState().setFichasTreino([]);
+              const novaFicha = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
+              exibirMensagem(`🔥 Base de fichas recriada: ${novaFicha.title}`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                status: "sucesso",
+                acao: "base_substituida_e_ficha_criada",
+                ficha: novaFicha
+              });
+            }
+            else if (acao === 'atualizar') {
+              let fichaEditada = useFitnessStore.getState().updateFichaTreino(titulo, {
+                title: titulo,
+                exercicios: exercicios.length > 0 ? exercicios : undefined
+              });
+              // Se não encontrou ficha com esse nome para atualizar, cria uma nova automaticamente!
+              if (!fichaEditada) {
+                fichaEditada = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
+              }
+              exibirMensagem(`💪 Ficha atualizada: ${fichaEditada.title}`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                status: "sucesso",
+                ficha: fichaEditada
+              });
+            } 
+            else if (acao === 'deletar') {
+              useFitnessStore.getState().deleteFichaTreino(titulo);
+              exibirMensagem(`🗑️ Ficha removida: ${titulo}`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                status: "sucesso",
+                ficha_deletada: titulo
+              });
+            }
+            return;
+          }
+
+          // 2. FERRAMENTA DE REGISTROS GERAIS
           if (name === "registrar_dado") {
             const entidade = (args.entidade || '').toLowerCase().trim();
             const dados = args.dados || args || {};
 
-            // Normaliza os campos para aceitar qualquer variação que o modelo enviar
             const tituloFinal = (
               dados.titulo || dados.title || dados.descricao || 
               dados.description || dados.modalidade || dados.nome || "Novo Registro"
@@ -294,6 +330,22 @@ export default function BarraComandoIA() {
             const horaFinal = dados.hora || dados.time || null;
             const categoriaFinal = dados.categoria || dados.category || null;
             const statusFinal = dados.status || null;
+
+            // INTERCEPTADOR ANTI-INBOX: Se vier lista de exercícios ou entidade de ficha, salva como Ficha de Treino!
+            if (
+              entidade === 'ficha_treino' || 
+              entidade === 'ficha' || 
+              (Array.isArray(dados.exercicios) && dados.exercicios.length > 0)
+            ) {
+              const novaFicha = useFitnessStore.getState().addFichaTreino(tituloFinal, dados.exercicios || []);
+              exibirMensagem(`💪 Ficha criada: ${novaFicha.title}`);
+              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
+                status: "sucesso",
+                entidade: "ficha_treino",
+                ficha_criada: novaFicha
+              });
+              return;
+            }
 
             switch (entidade) {
               case 'agenda':
@@ -382,75 +434,88 @@ export default function BarraComandoIA() {
               case 'peso': {
                 await useFitnessStore.getState().addHealthLog('peso', 'Peso', valorFinal, 'kg');
                 exibirMensagem(`⚖️ Peso registrado: ${valorFinal} kg`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "peso",
-                  valor_kg: valorFinal
-                });
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", valor_kg: valorFinal });
                 break;
               }
 
-              case 'treino': {
+              case 'treino':
+              case 'treino_concluido': {
                 const duracao = valorFinal > 0 ? valorFinal : 50;
-                await useFitnessStore.getState().addHealthLog('treino', tituloFinal, duracao, 'min');
-                exibirMensagem(`🏋️ Treino: ${tituloFinal} (${duracao} min)`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "treino",
-                  treino: tituloFinal
-                });
+                await useFitnessStore.getState().concluirFichaTreino(tituloFinal, duracao);
+                exibirMensagem(`🏋️ Treino concluído: ${tituloFinal} (${duracao} min)`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", treino: tituloFinal });
                 break;
               }
 
               case 'medida': {
                 await useFitnessStore.getState().addHealthLog('medida', tituloFinal, valorFinal, 'cm');
                 exibirMensagem(`📏 Medida (${tituloFinal}): ${valorFinal} cm`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "medida",
-                  medida: tituloFinal,
-                  valor_cm: valorFinal
-                });
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", medida: tituloFinal, valor_cm: valorFinal });
+                break;
+              }
+
+              case 'sono': {
+                const horas = valorFinal > 0 ? valorFinal : 7.5;
+                await useFitnessStore.getState().addHealthLog('sono', `Sono: ${tituloFinal}`, horas, 'h');
+                exibirMensagem(`🌙 Sono registrado: ${horas}h (${tituloFinal})`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", horas_dormidas: horas });
+                break;
+              }
+
+              case 'humor':
+              case 'mente': {
+                const notaHumor = valorFinal >= 1 && valorFinal <= 5 ? valorFinal : 4;
+                await useFitnessStore.getState().addHealthLog('humor', `Humor: ${tituloFinal}`, notaHumor, '/5');
+                exibirMensagem(`🧠 Check-in Mental: ${notaHumor}/5 (${tituloFinal})`);
+                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", nota: notaHumor });
                 break;
               }
 
               default: {
-                // Fallback: se o modelo mandar uma entidade desconhecida, salva no Inbox para nunca perder a nota
                 const fallbackTask = await useInboxStore.getState().addInboxTask(tituloFinal, dataFinal);
                 exibirMensagem(`📥 Inbox: ${tituloFinal}`);
                 liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
                   status: "sucesso",
-                  detalhe: "Salvo na Inbox Diária",
                   registro_criado: fallbackTask
                 });
               }
             }
           } 
           
+          // 3. FERRAMENTA DE ALTERAÇÃO / CONCLUSÃO / EXCLUSÃO
           else if (name === "alterar_dado") {
             const acao = (args.acao || '').toLowerCase().trim();
             const entidade = (args.entidade || '').toLowerCase().trim();
             const rawId = args.id;
 
             if (acao === 'concluir') {
-              if (entidade === 'inbox' || entidade === 'tarefa') {
+              if (entidade === 'ficha_treino' || entidade === 'treino') {
+                const duracao = args.dados?.valor || 50;
+                await useFitnessStore.getState().concluirFichaTreino(rawId, duracao);
+                exibirMensagem(`🏋️ Ficha concluída: ${rawId}`);
+              } else if (entidade === 'inbox' || entidade === 'tarefa') {
                 const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
                 await useInboxStore.getState().toggleInboxTask(targetId, false);
+                exibirMensagem(`✅ Tarefa concluída!`);
               } else if (entidade === 'agenda' || entidade === 'evento') {
                 const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
                 await useAgendaStore.getState().toggleItemCompletion(targetId, false);
-              } else if (entidade === 'financas' || entidade === 'despesa' || entidade === 'receita') {
+                exibirMensagem(`✅ Compromisso concluído!`);
+              } else if (entidade === 'financas') {
                 const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
                 await useFinanceStore.getState().toggleTransactionStatus(targetId);
+                exibirMensagem(`✅ Conta marcada como paga!`);
               } else if (entidade === 'kanban') {
                 const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
                 await useKanbanStore.getState().moveTask(targetId, 'done');
+                exibirMensagem(`✅ Projeto movido para Concluído!`);
               }
-              exibirMensagem(`✅ Registro marcado como concluído!`);
               liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "concluido" });
             } 
             else if (acao === 'deletar' || acao === 'excluir') {
-              if (entidade === 'financas') {
+              if (entidade === 'ficha_treino') {
+                useFitnessStore.getState().deleteFichaTreino(rawId);
+              } else if (entidade === 'financas') {
                 const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
                 await useFinanceStore.getState().deleteTransaction(targetId);
               } else if (entidade === 'agenda') {
@@ -462,45 +527,50 @@ export default function BarraComandoIA() {
               } else if (entidade === 'kanban') {
                 const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
                 await useKanbanStore.getState().deleteTask(targetId);
+              } else {
+                const targetId = resolverIdPorNomeOuId(useFitnessStore.getState().healthLogs, rawId, 'title');
+                await useFitnessStore.getState().deleteHealthLog(targetId);
               }
-              exibirMensagem(`🗑️ Registro removido com sucesso.`);
+              exibirMensagem(`🗑️ Registro removido.`);
               liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "deletado" });
             }
             else if (acao === 'atualizar') {
               const novosDados = args.dados || {};
-              if (entidade === 'kanban' && novosDados.status) {
+              if (entidade === 'ficha_treino') {
+                const fichaEditada = useFitnessStore.getState().updateFichaTreino(rawId, {
+                  title: novosDados.titulo || novosDados.title || rawId,
+                  exercicios: novosDados.exercicios
+                });
+                exibirMensagem(`💪 Ficha atualizada: ${fichaEditada?.title || rawId}`);
+              } else if (entidade === 'kanban' && novosDados.status) {
                 const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
                 await useKanbanStore.getState().moveTask(targetId, novosDados.status);
+                exibirMensagem(`🔄 Cartão Kanban movido.`);
               }
-              exibirMensagem(`🔄 Registro atualizado.`);
               liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "atualizado" });
             }
           } 
           
+          // 4. FERRAMENTA DE CONSULTA
           else if (name === "consultar_dados") {
             const relatorioCompleto = gerarRelatorioExecutivo();
             let respostaConsulta = {};
 
-            if (args.entidade === 'financas') {
-              respostaConsulta = relatorioCompleto.resumo_financeiro;
-            } else if (args.entidade === 'agenda' || args.entidade === 'inbox' || args.entidade === 'kanban') {
-              respostaConsulta = relatorioCompleto.produtividade;
-            } else if (args.entidade === 'treino') {
-              respostaConsulta = relatorioCompleto.saude_fitness;
-            } else {
-              respostaConsulta = relatorioCompleto;
-            }
+            if (args.entidade === 'financas') respostaConsulta = relatorioCompleto.resumo_financeiro;
+            else if (args.entidade === 'treino') respostaConsulta = relatorioCompleto.saude_fitness;
+            else if (['agenda', 'inbox', 'kanban'].includes(args.entidade)) respostaConsulta = relatorioCompleto.produtividade;
+            else respostaConsulta = relatorioCompleto;
 
-            exibirMensagem(`📊 Analisando dados (${args.entidade || 'geral'})...`);
+            exibirMensagem(`📊 Consultando base (${args.entidade || 'geral'})...`);
             liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, respostaConsulta);
           }
 
         } catch (erro) {
           console.error("[Bastian] Erro ao executar ferramenta:", erro);
-          exibirMensagem(`⚠️ Erro ao processar comando: ${erro.message || 'Falha no banco'}`);
+          exibirMensagem(`⚠️ Erro ao processar comando: ${erro.message || 'Falha'}`);
           liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
             status: "erro",
-            mensagem: erro.message || "Falha ao gravar no banco de dados."
+            mensagem: erro.message || "Falha ao executar comando."
           });
         }
       };
