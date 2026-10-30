@@ -1,3 +1,4 @@
+// src/store/useFitnessStore.js
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from './useAuthStore';
@@ -78,15 +79,73 @@ const resolveDefaultUnit = (type, unit) => {
 export const useFitnessStore = create((set, get) => ({
   healthLogs: [],
   fichasTreino: loadInitialFichas(),
+  fichaSyncRowId: null, // Guarda o ID da linha de sincronização no Supabase
   isLoading: false,
   error: null,
 
   // =========================================================================
-  // MÓDULO 1: GESTÃO DE FICHAS DE TREINO (Acessível pela UI e pelo Bastian!)
+  // SINCRONIZADOR EM NUVEM DAS FICHAS (Via Supabase health_logs)
   // =========================================================================
-  setFichasTreino: (novasFichas) => {
+  syncFichasWithCloud: async (novasFichas) => {
     saveFichasToStorage(novasFichas);
     set({ fichasTreino: novasFichas });
+
+    try {
+      const userId = await resolveUserId();
+      if (!userId) return;
+
+      const jsonString = JSON.stringify(novasFichas);
+      let syncId = get().fichaSyncRowId;
+
+      // Verifica se já existe uma linha 'ficha_sync' no banco para este usuário
+      if (!syncId) {
+        const { data: existing } = await supabase
+          .from('health_logs')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('type', 'ficha_sync')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          syncId = existing[0].id;
+          set({ fichaSyncRowId: syncId });
+        }
+      }
+
+      if (syncId) {
+        const { error } = await supabase
+          .from('health_logs')
+          .update({ title: jsonString, value: novasFichas.length })
+          .eq('id', syncId);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from('health_logs')
+          .insert([{
+            type: 'ficha_sync',
+            title: jsonString,
+            value: novasFichas.length,
+            unit: 'fichas',
+            user_id: userId
+          }])
+          .select()
+          .single();
+
+        if (!error && data) {
+          set({ fichaSyncRowId: data.id });
+        }
+      }
+    } catch (err) {
+      console.error('[Supabase] Erro ao sincronizar fichas na nuvem:', err);
+    }
+  },
+
+  // =========================================================================
+  // MÓDULO 1: GESTÃO DE FICHAS DE TREINO (Sincronizado Celular + Tablet + PC)
+  // =========================================================================
+  setFichasTreino: (novasFichas) => {
+    get().syncFichasWithCloud(novasFichas);
   },
 
   addFichaTreino: (title, exercicios = []) => {
@@ -106,8 +165,7 @@ export const useFitnessStore = create((set, get) => ({
     };
 
     const atualizadas = [...get().fichasTreino, novaFicha];
-    saveFichasToStorage(atualizadas);
-    set({ fichasTreino: atualizadas });
+    get().syncFichasWithCloud(atualizadas);
     return novaFicha;
   },
 
@@ -141,8 +199,7 @@ export const useFitnessStore = create((set, get) => ({
       f.id === targetFicha.id ? fichaAtualizada : f
     );
 
-    saveFichasToStorage(atualizadas);
-    set({ fichasTreino: atualizadas });
+    get().syncFichasWithCloud(atualizadas);
     return fichaAtualizada;
   },
 
@@ -157,8 +214,7 @@ export const useFitnessStore = create((set, get) => ({
     if (!targetFicha) return false;
 
     const atualizadas = fichasAtuais.filter((f) => f.id !== targetFicha.id);
-    saveFichasToStorage(atualizadas);
-    set({ fichasTreino: atualizadas });
+    get().syncFichasWithCloud(atualizadas);
     return true;
   },
 
@@ -171,11 +227,10 @@ export const useFitnessStore = create((set, get) => ({
       fichasAtuais.find((f) => f.title.toLowerCase().includes(alvoStr));
 
     if (!ficha) {
-      // Se não achou ficha específica, salva como treino avulso com o título enviado
       return await get().addHealthLog('treino', String(idOrTitle || 'Treino Concluído'), duracaoMin, 'min');
     }
 
-    const resumoExercicios = ficha.exercicios
+    const resumoExercicios = (ficha.exercicios || [])
       .map((e) => `${e.nome} (${e.series} ${e.reps} - ${e.carga})`)
       .join(' • ');
 
@@ -188,7 +243,7 @@ export const useFitnessStore = create((set, get) => ({
   },
 
   // =========================================================================
-  // MÓDULO 2: HISTÓRICO NO SUPABASE (health_logs: treinos, pesos e medidas)
+  // MÓDULO 2: HISTÓRICO NO SUPABASE (Separa as fichas da lista de logs!)
   // =========================================================================
   fetchHealthLogs: async () => {
     set({ isLoading: true, error: null });
@@ -206,7 +261,32 @@ export const useFitnessStore = create((set, get) => ({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      set({ healthLogs: data || [] });
+
+      const allRows = data || [];
+      
+      // 1. Procura o registro especial de sincronização de fichas na nuvem
+      const syncRow = allRows.find((r) => r.type === 'ficha_sync');
+      if (syncRow && syncRow.title) {
+        try {
+          const cloudFichas = JSON.parse(syncRow.title);
+          if (Array.isArray(cloudFichas)) {
+            saveFichasToStorage(cloudFichas);
+            set({ fichasTreino: cloudFichas, fichaSyncRowId: syncRow.id });
+          }
+        } catch (parseErr) {
+          console.warn('Falha ao ler JSON de fichas da nuvem:', parseErr);
+        }
+      } else {
+        // Se ainda não existe na nuvem, sobe as fichas locais atuais deste dispositivo!
+        const currentLocalFichas = get().fichasTreino;
+        if (currentLocalFichas && currentLocalFichas.length > 0) {
+          get().syncFichasWithCloud(currentLocalFichas);
+        }
+      }
+
+      // 2. Filtra 'ficha_sync' para que nunca apareça como item no histórico de atividades
+      const visibleLogs = allRows.filter((r) => r.type !== 'ficha_sync');
+      set({ healthLogs: visibleLogs });
     } catch (error) {
       console.error('[Supabase] Erro ao buscar health_logs:', error);
       set({ error: error.message });
