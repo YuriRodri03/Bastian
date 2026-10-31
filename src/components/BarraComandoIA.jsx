@@ -1,6 +1,6 @@
 // src/components/BarraComandoIA.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, MessageSquare } from 'lucide-react';
+import { Activity, MessageSquare, Mic, Users, RefreshCw } from 'lucide-react';
 
 import { GeminiLiveConnection } from '../services/liveAiService';
 import { GerenciadorDeAudio } from '../services/audioManager';
@@ -26,6 +26,9 @@ export default function BarraComandoIA() {
 
   const [isIntercomActive, setIsIntercomActive] = useState(false);
   const [ultimaMensagem, setUltimaMensagem] = useState(null);
+  
+  // Estado visual do locutor identificado pela biometria vocal
+  const [speakerInfo, setSpeakerInfo] = useState(null); // { locutor: 'Yuri' | 'Visitante', confianca: 95, pitchHz: 120 }
   
   const liveConnectionRef = useRef(null);
   const audioManagerRef = useRef(null);
@@ -205,6 +208,14 @@ export default function BarraComandoIA() {
     return "Boa noite";
   };
 
+  const handleRecalibrarVoz = () => {
+    if (audioManagerRef.current && audioManagerRef.current.resetarPerfilVocal) {
+      audioManagerRef.current.resetarPerfilVocal();
+      setSpeakerInfo(null);
+      exibirMensagem("🎙️ Perfil resetado! Fale uma frase normalmente para calibrar sua voz.");
+    }
+  };
+
   const ligarSistema = async () => {
     updateAiState('starting');
     setIsIntercomActive(true);
@@ -218,9 +229,29 @@ export default function BarraComandoIA() {
         if (liveConnectionRef.current) liveConnectionRef.current.enviarAudioVoz(base64Pcm);
       };
 
-      const aoDetectarSilencio = () => {
+      // =========================================================================
+      // DETECTOR DE SILÊNCIO INTEGRADO COM BIOMETRIA VOCAL (Yuri vs. Visitante)
+      // =========================================================================
+      const aoDetectarSilencio = (analiseLocutor) => {
         if (liveConnectionRef.current && aiStateRef.current === 'listening') {
-          liveConnectionRef.current.forcarResposta();
+          if (analiseLocutor) {
+            setSpeakerInfo(analiseLocutor);
+
+            if (analiseLocutor.recemCalibrado) {
+              exibirMensagem(`🎙️ Biometria vocal do Yuri calibrada (${analiseLocutor.pitchHz} Hz)`);
+            }
+          }
+
+          // Se a biometria detectar outra voz no ambiente, envia o alerta acústico junto com o fim de turno
+          if (analiseLocutor && analiseLocutor.locutor === 'Visitante') {
+            exibirMensagem(`👥 Voz externa detectada (${analiseLocutor.confianca}% similaridade)`);
+            liveConnectionRef.current.enviarComandoSilencioso(
+              `[AVISO DO SENSOR ACÚSTICO: A fala anterior partiu de uma VOZ EXTERNA/VISITANTE no ambiente (Timbre medido: ${analiseLocutor.pitchHz}Hz vs Perfil de Yuri: ${analiseLocutor.perfilPitchHz}Hz). Se essa pessoa estiver falando diretamente com você, responda cordialmente tratando-a como convidado do Yuri. TRAVA DE SEGURANÇA: Não apague dados nem registre finanças para vozes externas sem confirmação do Yuri. Se for apenas conversa paralela que não é com você, ignore.]`
+            );
+          } else {
+            liveConnectionRef.current.forcarResposta();
+          }
+
           updateAiState('processing'); 
         }
       };
@@ -291,7 +322,6 @@ export default function BarraComandoIA() {
                 title: titulo,
                 exercicios: exercicios.length > 0 ? exercicios : undefined
               });
-              // Se não encontrou ficha com esse nome para atualizar, cria uma nova automaticamente!
               if (!fichaEditada) {
                 fichaEditada = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
               }
@@ -542,10 +572,28 @@ export default function BarraComandoIA() {
                   exercicios: novosDados.exercicios
                 });
                 exibirMensagem(`💪 Ficha atualizada: ${fichaEditada?.title || rawId}`);
-              } else if (entidade === 'kanban' && novosDados.status) {
+              } else if (entidade === 'inbox' || entidade === 'tarefa') {
+                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
+                const updates = {};
+                if (novosDados.titulo || novosDados.title) updates.title = novosDados.titulo || novosDados.title;
+                if (novosDados.data || novosDados.date) updates.date = novosDados.data || novosDados.date;
+                await useInboxStore.getState().updateInboxTask(targetId, updates);
+                exibirMensagem(`✏️ Tarefa atualizada!`);
+              } else if (entidade === 'agenda' || entidade === 'evento') {
+                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
+                const updates = {};
+                if (novosDados.titulo || novosDados.title) updates.title = novosDados.titulo || novosDados.title;
+                if (novosDados.data || novosDados.date) updates.date = novosDados.data || novosDados.date;
+                if (novosDados.hora || novosDados.time) updates.time = novosDados.hora || novosDados.time;
+                await useAgendaStore.getState().updateAgendaItem(targetId, updates);
+                exibirMensagem(`✏️ Compromisso atualizado!`);
+              } else if (entidade === 'kanban') {
                 const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
-                await useKanbanStore.getState().moveTask(targetId, novosDados.status);
-                exibirMensagem(`🔄 Cartão Kanban movido.`);
+                if (novosDados.status) await useKanbanStore.getState().moveTask(targetId, novosDados.status);
+                if (novosDados.titulo || novosDados.title) {
+                  await useKanbanStore.getState().updateTask(targetId, { title: novosDados.titulo || novosDados.title });
+                }
+                exibirMensagem(`🔄 Cartão Kanban atualizado.`);
               }
               liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "atualizado" });
             }
@@ -606,6 +654,7 @@ export default function BarraComandoIA() {
     if (liveConnectionRef.current) { liveConnectionRef.current.desconectar(); liveConnectionRef.current = null; }
     if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
     setIsIntercomActive(false);
+    setSpeakerInfo(null);
     updateAiState('idle');
     setUltimaMensagem(null);
   };
@@ -638,8 +687,9 @@ export default function BarraComandoIA() {
   };
 
   return (
-    <div className="fixed bottom-6 right-4 sm:right-8 z-50 flex flex-col items-end gap-3 pointer-events-none">
+    <div className="fixed bottom-6 right-4 sm:right-8 z-50 flex flex-col items-end gap-2.5 pointer-events-none">
       
+      {/* BALÃO DE FALA E FEEDBACK DA IA */}
       {ultimaMensagem && (
         <div className="pointer-events-auto max-w-[280px] sm:max-w-xs bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-2xl rounded-br-sm shadow-2xl animate-in fade-in slide-in-from-bottom-5">
           <div className="flex items-start gap-3">
@@ -653,6 +703,36 @@ export default function BarraComandoIA() {
         </div>
       )}
 
+      {/* BARRA DE BIOMETRIA VOCAL + RECALIBRAÇÃO (Aparece quando o Bastian está ativo) */}
+      {isIntercomActive && (
+        <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded-full shadow-lg animate-in fade-in duration-200">
+          {speakerInfo ? (
+            <span className={`flex items-center gap-1 text-[10px] font-bold tracking-wide ${
+              speakerInfo.locutor === 'Yuri' ? 'text-cyan-300' : 'text-amber-300'
+            }`}>
+              {speakerInfo.locutor === 'Yuri' ? <Mic size={11} className="text-cyan-400" /> : <Users size={11} className="text-amber-400" />}
+              {speakerInfo.locutor} ({speakerInfo.confianca}%)
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400">
+              <Mic size={11} className="text-cyan-400 animate-pulse" /> Escuta Biométrica
+            </span>
+          )}
+
+          <div className="w-px h-3 bg-white/10 mx-0.5" />
+
+          <button
+            type="button"
+            onClick={handleRecalibrarVoz}
+            title="Recalibrar minha assinatura de voz"
+            className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+          >
+            <RefreshCw size={10} /> Calibrar
+          </button>
+        </div>
+      )}
+
+      {/* ORBE PRINCIPAL DO BASTIAN */}
       <div className="pointer-events-auto relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 transition-all duration-300">
         
         {isIntercomActive && (
