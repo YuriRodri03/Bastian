@@ -21,14 +21,12 @@ const getLocalTodayISO = () => {
 };
 
 // =========================================================================
-// MOTOR DE PESQUISA NA INTERNET BLINDADO (Auto-Descoberta de Modelo + Fallback)
+// MOTOR DE PESQUISA NA INTERNET EM TEMPO REAL (Zero Cota Gemini / Zero Erro 429)
 // =========================================================================
-let cachedWorkingModel = null;
-
 const buscarNaWebComGemini = async (consulta) => {
   if (!consulta) return { status: 'erro', mensagem: 'Consulta vazia.' };
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const termo = consulta.toLowerCase().trim();
   const dataHoje = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long',
     year: 'numeric',
@@ -36,139 +34,131 @@ const buscarNaWebComGemini = async (consulta) => {
     day: 'numeric'
   });
 
-  // Lista de modelos em ordem de prioridade (gemini-flash-latest aponta sempre para o modelo ativo na chave)
-  const candidateModels = [
-    cachedWorkingModel,
-    'gemini-flash-latest',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash-preview'
-  ].filter(Boolean);
+  const resultados = [];
+  const fontes = [];
 
-  // Se nenhum modelo da lista funcionar de primeira, descobre automaticamente na API qual modelo está ativo na sua chave
-  const descobrirModeloDaChave = async () => {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      if (!res.ok) return null;
-      const json = await res.json();
-      const validModel = (json.models || []).find(
-        (m) =>
-          m.name.includes('flash') &&
-          !m.name.includes('audio') &&
-          !m.name.includes('image') &&
-          !m.name.includes('tts') &&
-          (m.supportedGenerationMethods || []).includes('generateContent')
-      );
-      return validModel ? validModel.name.replace('models/', '') : null;
-    } catch {
-      return null;
+  try {
+    // 1. COTAÇÕES FINANCEIRAS EM TEMPO REAL (Dólar, Euro, Bitcoin)
+    if (/(d[oó]lar|euro|bitcoin|btc|moeda|cota[cç][aã]o|c[aâ]mbio|libra)/i.test(termo)) {
+      try {
+        const resMoedas = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL');
+        if (resMoedas.ok) {
+          const d = await resMoedas.json();
+          const usd = Number(d.USDBRL?.bid || 0).toFixed(2);
+          const usdVar = d.USDBRL?.pctChange;
+          const eur = Number(d.EURBRL?.bid || 0).toFixed(2);
+          const btc = Number(d.BTCBRL?.bid || 0).toLocaleString('pt-BR');
+          resultados.push(
+            `Cotações comerciais agora: Dólar (USD) a R$ ${usd} (variação de ${usdVar}% hoje), Euro (EUR) a R$ ${eur} e Bitcoin (BTC) a R$ ${btc}.`
+          );
+          fontes.push('AwesomeAPI Câmbio');
+        }
+      } catch {}
     }
-  };
 
-  const executarRequisicaoGemini = async (modelName) => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: `Data de hoje: ${dataHoje} (Local: Fortaleza, CE, Brasil).
-Pesquise no Google em tempo real e responda de forma direta, factual e com dados/números atualizados à seguinte solicitação: "${consulta}".
-Forneça um resumo objetivo de 3 a 4 frases pronto para ser lido em voz alta, sem formatação markdown.`
-              }
-            ]
+    // 2. INDICADORES DO BANCO CENTRAL DO BRASIL (Selic / Juros / Copom)
+    if (/(selic|juros|ipca|infla[cç][aã]o|cdi|copom|taxa)/i.test(termo)) {
+      try {
+        const resSelic = await fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json');
+        if (resSelic.ok) {
+          const sData = await resSelic.json();
+          if (sData?.[0]?.valor) {
+            resultados.push(`Taxa Selic Meta atual (Banco Central): ${sData[0].valor}% ao ano (data base: ${sData[0].data}).`);
+            fontes.push('Banco Central do Brasil');
           }
-        ],
-        tools: [{ googleSearch: {} }]
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP_${response.status}`);
+        }
+      } catch {}
     }
-    return await response.json();
-  };
 
-  // 1. Tenta com os modelos candidatos
-  for (const model of candidateModels) {
+    // 3. CLIMA E PREVISÃO DO TEMPO (Fortaleza-CE)
+    if (/(clima|tempo|chuva|chover|temperatura|graus|calor|previs[aã]o)/i.test(termo)) {
+      try {
+        const resClima = await fetch(
+          'https://api.open-meteo.com/v1/forecast?latitude=-3.7172&longitude=-38.5433&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FFortaleza&forecast_days=1'
+        );
+        if (resClima.ok) {
+          const c = await resClima.json();
+          const tempAtual = c.current?.temperature_2m;
+          const sensacao = c.current?.apparent_temperature;
+          const umidade = c.current?.relative_humidity_2m;
+          const probChuva = c.daily?.precipitation_probability_max?.[0] ?? 0;
+          const max = c.daily?.temperature_2m_max?.[0];
+          const min = c.daily?.temperature_2m_min?.[0];
+
+          resultados.push(
+            `Clima agora em Fortaleza: ${tempAtual}°C (sensação térmica de ${sensacao}°C, umidade em ${umidade}%). Para hoje: máxima de ${max}°C, mínima de ${min}°C e probabilidade de chuva de ${probChuva}%.`
+          );
+          fontes.push('Open-Meteo Fortaleza');
+        }
+      } catch {}
+    }
+
+    // 4. NOTÍCIAS DO DIA EM TEMPO REAL (Google News Brasil RSS -> JSON)
+    if (/(not[ií]cia|manchete|jornal|acontecendo|novidade|atualidade|mundo|pol[ií]tica|economia|esporte|jogo)/i.test(termo) || resultados.length === 0) {
+      try {
+        const queryLimpa = termo
+          .replace(/(quais as|me dê|me da|not[ií]cias sobre|not[ií]cias de|hoje|agora|pesquise)/gi, '')
+          .trim();
+
+        const rssUrl = queryLimpa.length > 2
+          ? `https://news.google.com/rss/search?q=${encodeURIComponent(queryLimpa)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`
+          : `https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419`;
+
+        const resNews = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`);
+        if (resNews.ok) {
+          const newsData = await resNews.json();
+          const manchetes = (newsData.items || [])
+            .slice(0, 4)
+            .map((item, i) => `${i + 1}. ${item.title}`)
+            .join(' | ');
+
+          if (manchetes) {
+            resultados.push(`Principais manchetes recentes no Google Notícias: ${manchetes}`);
+            fontes.push('Google News BR');
+          }
+        }
+      } catch {}
+    }
+
+    // 5. BUSCA ENCICLOPÉDICA E FATOS ESPECÍFICOS (Wikipedia PT API)
     try {
-      const data = await executarRequisicaoGemini(model);
-      cachedWorkingModel = model; // Salva em cache o modelo que funcionou!
+      const wikiUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(consulta)}&utf8=&format=json&origin=*`;
+      const wikiRes = await fetch(wikiUrl);
+      if (wikiRes.ok) {
+        const wikiData = await wikiRes.json();
+        const snippets = (wikiData?.query?.search || [])
+          .slice(0, 2)
+          .map((item) => `${item.title}: ${item.snippet.replace(/<[^>]*>?/gm, '')}`)
+          .join(' | ');
 
-      const candidate = data?.candidates?.[0];
-      const textoResposta =
-        candidate?.content?.parts?.map((p) => p.text).join(' ') ||
-        'Não encontrei resultados detalhados para essa busca.';
+        if (snippets) {
+          resultados.push(`Dados de referência: ${snippets}`);
+          fontes.push('Wikipedia PT');
+        }
+      }
+    } catch {}
 
-      const chunks = candidate?.groundingMetadata?.groundingChunks || [];
-      const fontes = chunks
-        .map((c) => c.web?.title)
-        .filter(Boolean)
-        .slice(0, 4);
-
+    if (resultados.length > 0) {
       return {
         status: 'sucesso',
-        modelo_utilizado: model,
         data_consulta: dataHoje,
-        resultado_atualizado: textoResposta.trim(),
+        resultado_atualizado: resultados.join(' \n '),
         fontes_consultadas: fontes
       };
-    } catch (err) {
-      console.warn(`[Bastian WebSearch] Modelo ${model} indisponível (${err.message}), tentando próximo...`);
     }
-  }
 
-  // 2. Auto-Descoberta dinâmica se os nomes padrão mudarem
-  try {
-    const discovered = await descobrirModeloDaChave();
-    if (discovered) {
-      const data = await executarRequisicaoGemini(discovered);
-      cachedWorkingModel = discovered;
-      const candidate = data?.candidates?.[0];
-      const textoResposta = candidate?.content?.parts?.map((p) => p.text).join(' ') || '';
-      return {
-        status: 'sucesso',
-        modelo_utilizado: discovered,
-        data_consulta: dataHoje,
-        resultado_atualizado: textoResposta.trim(),
-        fontes_consultadas: ['Google Search']
-      };
-    }
+    return {
+      status: 'sucesso',
+      data_consulta: dataHoje,
+      resultado_atualizado: 'A busca externa foi concluída, mas não retornou manchetes específicas para este termo exato.',
+      fontes_consultadas: ['Web Search']
+    };
   } catch (err) {
-    console.warn('[Bastian WebSearch] Falha no modelo autodescoberto:', err);
+    return {
+      status: 'erro',
+      mensagem: 'Não foi possível concluir a pesquisa externa no momento.'
+    };
   }
-
-  // 3. Fallback Público Direto (Wikipedia PT API) para fatos específicos caso a API bata limite
-  try {
-    const wikiUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(consulta)}&utf8=&format=json&origin=*`;
-    const wikiRes = await fetch(wikiUrl);
-    const wikiData = await wikiRes.json();
-    const snippets = (wikiData?.query?.search || [])
-      .slice(0, 3)
-      .map((item) => `${item.title}: ${item.snippet.replace(/<[^>]*>?/gm, '')}`)
-      .join(' | ');
-
-    if (snippets) {
-      return {
-        status: 'sucesso',
-        data_consulta: dataHoje,
-        resultado_atualizado: snippets,
-        fontes_consultadas: ['Wikipedia PT']
-      };
-    }
-  } catch (wikiErr) {
-    console.error('[Bastian WebSearch] Erro total na busca:', wikiErr);
-  }
-
-  return {
-    status: 'erro',
-    mensagem: 'Não foi possível concluir a pesquisa externa no momento.'
-  };
 };
 
 export default function BarraComandoIA() {
