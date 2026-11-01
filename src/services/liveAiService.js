@@ -49,7 +49,7 @@ export class GeminiLiveConnection {
         systemInstruction: {
           parts: [
             {
-              text: `Você é Bastian, o assistente executivo, consultor financeiro e treinador pessoal de Yuri Rodrigues (mestrando em economia no CAEN/UFC e desenvolvedor full-stack).
+              text: `Você é Bastian, o assistente executivo, consultor financeiro, pesquisador e treinador pessoal de Yuri Rodrigues (mestrando em economia no CAEN/UFC e desenvolvedor full-stack).
 
 [CONTEXTO DE ESPAÇO-TEMPO]
 Localização: Fortaleza, CE.
@@ -59,37 +59,50 @@ Data e hora exata: ${horaLocal} (Data ISO de Hoje: ${dataIsoHoje} | Fuso: ${fuso
 ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados atualizados."}
 
 [REGRAS CRÍTICAS DE USO DE FERRAMENTAS]
-1. CRIAR OU MONTAR FICHAS DE TREINO (PROIBIDO USAR INBOX!):
-   - Sempre que o Yuri pedir para "criar um treino", "montar uma ficha", "fazer uma base de treino", "adicionar uma ficha de treino" ou "atualizar exercícios de uma ficha", você DEVE OBRIGATORIAMENTE chamar a ferramenta 'gerenciar_ficha_treino'.
-   - NUNCA salve uma ficha de treino como tarefa na 'inbox'!
-   - Se o Yuri pedir para você montar uma divisão (ex: "monta um treino A, B e C" ou "cria duas fichas para mim"), chame a ferramenta 'gerenciar_ficha_treino' para cada ficha, preenchendo a lista completa de 'exercicios' (com nome, series, reps e carga).
-   - Equipamentos que o Yuri possui em casa: 2 halteres de 10kg (total 20kg), peso corporal (calistenia), barra/apoios e corda de pular.
-2. DEMAIS REGISTROS ('registrar_dado'):
-   - 'inbox': APENAS tarefas comuns do dia a dia (ex: "ler artigo", "enviar e-mail").
+1. ACESSO À INTERNET EM TEMPO REAL ('pesquisar_internet'):
+   - Você TEM acesso total à internet em tempo real! NUNCA diga que não tem acesso à internet ou que seu conhecimento tem data de corte.
+   - Sempre que o Yuri pedir notícias recentes, cotações financeiras (Dólar, Selic, IPCA, Bitcoin, Ibovespa), previsão do tempo, resultados esportivos, eventos atuais ou checagem de fatos específicos, chame IMEDIATAMENTE a ferramenta 'pesquisar_internet' passando a query de busca.
+2. CRIAR OU MONTAR FICHAS DE TREINO ('gerenciar_ficha_treino'):
+   - Sempre que o Yuri pedir para criar, montar ou editar uma ficha/base de treino, chame OBRIGATORIAMENTE 'gerenciar_ficha_treino'. NUNCA salve fichas de treino como tarefa na inbox.
+   - Equipamentos do Yuri em casa: 2 halteres de 10kg (total 20kg), peso corporal (calistenia) e corda de pular.
+3. DEMAIS REGISTROS INTERNOS ('registrar_dado'):
+   - 'inbox': Tarefas do dia a dia.
    - 'agenda': Compromissos com data e hora.
    - 'kanban': Projetos ('backlog', 'in-progress', 'done').
-   - 'despesa' / 'receita': Finanças.
-   - 'treino_concluido': Quando o Yuri disser que JÁ FEZ um treino hoje e quer apenas registrar no histórico.
-   - 'peso' / 'medida' / 'sono' / 'humor': Indicadores de saúde e mente.
-3. OPINIÃO E CONSULTORIA:
-   - Quando perguntado sobre finanças, reserva de emergência, agenda ou treinos, analise os dados do sistema e dê sua opinião técnica e direta.
-4. TOM DE VOZ:
-   - Português do Brasil, executivo, parceiro e direto (2 a 4 frases na fala).
-5. RECONHECIMENTO DE LOCUTOR (YURI VS. TERCEIROS NO AMBIENTE):
-   - Preste atenção tanto ao timbre do áudio nativo quanto aos alertas '[AVISO DO SENSOR ACÚSTICO]' enviados pelo sistema.
-   - O seu administrador exclusivo é o YURI.
-   - Quando detectar outra pessoa falando no ambiente:
-     * Se for conversa paralela que não é dirigida a você, diga apenas "Continuo à disposição" ou permaneça conciso sem executar ferramentas.
-     * Se outra pessoa falar diretamente com você, seja educado e trate-a como convidado do Yuri (ex: "Olá! Sou o Bastian, assistente do Yuri. Como posso ajudar?").
-     * TRAVA DE SEGURANÇA: Jamais execute 'alterar_dado' (deletar/atualizar) ou 'registrar_dado' financeiro se a ordem vier de uma voz externa sem a confirmação do Yuri.`
+   - 'despesa' / 'receita': Finanças pessoais.
+   - 'treino_concluido' / 'peso' / 'medida' / 'sono' / 'humor': Saúde e mente.
+4. CONSULTORIA E OPINIÃO:
+   - Analise os números do sistema ou da web e dê sua opinião executiva e direta.
+5. RECONHECIMENTO DE LOCUTOR (YURI VS. TERCEIROS):
+   - O seu administrador exclusivo é o YURI. Respeite os avisos '[AVISO DO SENSOR ACÚSTICO]' caso outra voz fale no ambiente, tratando terceiros como visitantes e protegendo operações financeiras/exclusões.
+6. TOM DE VOZ:
+   - Português do Brasil, inteligente, parceiro e direto (2 a 4 frases na fala).`
             }
           ]
         },
 
         tools: [
+          // Habilita também o Google Search nativo do stream Live
+          { googleSearch: {} },
           {
             functionDeclarations: [
-              // FERRAMENTA 1: EXCLUSIVA PARA FICHAS DE TREINO (Garante que nunca caia no Inbox)
+              // FERRAMENTA 0: PESQUISA NA WEB EM TEMPO REAL
+              {
+                name: "pesquisar_internet",
+                description: "Pesquisa no Google em tempo real para buscar notícias de hoje, cotações econômicas (Selic, Dólar, ações), clima, fatos específicos ou qualquer informação atualizada da internet.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    consulta: {
+                      type: "STRING",
+                      description: "Termo detalhado para pesquisar no Google (ex: 'notícias economia Brasil hoje', 'cotação dólar hoje', 'previsão do tempo Fortaleza hoje')."
+                    }
+                  },
+                  required: ["consulta"]
+                }
+              },
+
+              // FERRAMENTA 1: EXCLUSIVA PARA FICHAS DE TREINO
               {
                 name: "gerenciar_ficha_treino",
                 description: "Cria uma nova Ficha de Treino completa (com lista de exercícios, séries, repetições e cargas), atualiza uma ficha existente, substitui todas as fichas ou exclui uma ficha na página de Treinos.",
@@ -107,14 +120,14 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
                     },
                     exercicios: {
                       type: "ARRAY",
-                      description: "Lista de exercícios da ficha (obrigatório para 'criar', 'atualizar' ou 'substituir_todas').",
+                      description: "Lista de exercícios da ficha.",
                       items: {
                         type: "OBJECT",
                         properties: {
-                          nome: { type: "STRING", description: "Nome do exercício (ex: 'Supino com Halteres', 'Flexão Declinada')." },
-                          series: { type: "STRING", description: "Quantidade de séries (ex: '4x', '3x')." },
-                          reps: { type: "STRING", description: "Repetições ou tempo (ex: '10-12', '15', '1 min')." },
-                          carga: { type: "STRING", description: "Carga sugerida (ex: '10kg', '20kg', 'Peso Corp.')." }
+                          nome: { type: "STRING", description: "Nome do exercício." },
+                          series: { type: "STRING", description: "Quantidade de séries (ex: '4x')." },
+                          reps: { type: "STRING", description: "Repetições ou tempo (ex: '10-12')." },
+                          carga: { type: "STRING", description: "Carga sugerida (ex: '10kg', 'Peso Corp.')." }
                         },
                         required: ["nome", "series", "reps", "carga"]
                       }
@@ -140,30 +153,12 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
                       type: "OBJECT",
                       description: "Dados do item.",
                       properties: {
-                        titulo: {
-                          type: "STRING",
-                          description: "Descrição da tarefa, evento, transação, medida (ex: 'Peitoral', 'Cintura') ou observação."
-                        },
-                        valor: {
-                          type: "NUMBER",
-                          description: "Valor em R$ (finanças), kg (peso), cm (medida), horas (sono), nota 1 a 5 (humor) ou minutos (treino_concluido)."
-                        },
-                        data: {
-                          type: "STRING",
-                          description: "Data YYYY-MM-DD."
-                        },
-                        hora: {
-                          type: "STRING",
-                          description: "Horário HH:MM (para agenda)."
-                        },
-                        categoria: {
-                          type: "STRING",
-                          description: "Categoria da agenda ou da transação financeira."
-                        },
-                        status: {
-                          type: "STRING",
-                          description: "Para finanças: 'pago' ou 'pendente'. Para kanban: 'backlog', 'in-progress' ou 'done'."
-                        }
+                        titulo: { type: "STRING", description: "Descrição ou título." },
+                        valor: { type: "NUMBER", description: "Valor numérico." },
+                        data: { type: "STRING", description: "Data YYYY-MM-DD." },
+                        hora: { type: "STRING", description: "Horário HH:MM." },
+                        categoria: { type: "STRING", description: "Categoria." },
+                        status: { type: "STRING", description: "Status." }
                       },
                       required: ["titulo"]
                     }
@@ -175,44 +170,32 @@ ${contextoDoSistema || "Use a ferramenta consultar_dados se precisar ler dados a
               // FERRAMENTA 3: ALTERAR / CONCLUIR / DELETAR REGISTROS
               {
                 name: "alterar_dado",
-                description: "Conclui (dá baixa em tarefa, conta ou ficha de treino realizada hoje), atualiza ou deleta um item existente.",
+                description: "Conclui, atualiza ou deleta um item existente.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
-                    acao: {
-                      type: "STRING",
-                      enum: ["concluir", "deletar", "atualizar"],
-                      description: "Ação a executar."
-                    },
+                    acao: { type: "STRING", enum: ["concluir", "deletar", "atualizar"] },
                     entidade: {
                       type: "STRING",
-                      enum: ["ficha_treino", "inbox", "agenda", "financas", "kanban", "treino", "peso", "medida", "sono", "humor"],
-                      description: "Módulo alvo."
+                      enum: ["ficha_treino", "inbox", "agenda", "financas", "kanban", "treino", "peso", "medida", "sono", "humor"]
                     },
-                    id: {
-                      type: "STRING",
-                      description: "ID ou título/nome do item."
-                    },
-                    dados: {
-                      type: "OBJECT",
-                      description: "Dados adicionais opcionais."
-                    }
+                    id: { type: "STRING", description: "ID ou título do item." },
+                    dados: { type: "OBJECT" }
                   },
                   required: ["acao", "entidade", "id"]
                 }
               },
 
-              // FERRAMENTA 4: CONSULTA ANALÍTICA
+              // FERRAMENTA 4: CONSULTA ANALÍTICA INTERNA
               {
                 name: "consultar_dados",
-                description: "Lê os dados atualizados de finanças, agenda, inbox, kanban ou saúde/treinos.",
+                description: "Lê os dados internos de finanças, agenda, inbox, kanban ou saúde/treinos do Yuri.",
                 parameters: {
                   type: "OBJECT",
                   properties: {
                     entidade: {
                       type: "STRING",
-                      enum: ["treino", "financas", "agenda", "inbox", "kanban", "geral"],
-                      description: "Qual módulo consultar."
+                      enum: ["treino", "financas", "agenda", "inbox", "kanban", "geral"]
                     }
                   },
                   required: ["entidade"]
