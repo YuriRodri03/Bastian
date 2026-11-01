@@ -21,14 +21,14 @@ const getLocalTodayISO = () => {
 };
 
 // =========================================================================
-// MOTOR DE PESQUISA NA INTERNET EM TEMPO REAL (Google Search Grounding)
+// MOTOR DE PESQUISA NA INTERNET BLINDADO (Auto-Descoberta de Modelo + Fallback)
 // =========================================================================
+let cachedWorkingModel = null;
+
 const buscarNaWebComGemini = async (consulta) => {
   if (!consulta) return { status: 'erro', mensagem: 'Consulta vazia.' };
 
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
   const dataHoje = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long',
     year: 'numeric',
@@ -36,7 +36,38 @@ const buscarNaWebComGemini = async (consulta) => {
     day: 'numeric'
   });
 
-  try {
+  // Lista de modelos em ordem de prioridade (gemini-flash-latest aponta sempre para o modelo ativo na chave)
+  const candidateModels = [
+    cachedWorkingModel,
+    'gemini-flash-latest',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash-preview'
+  ].filter(Boolean);
+
+  // Se nenhum modelo da lista funcionar de primeira, descobre automaticamente na API qual modelo está ativo na sua chave
+  const descobrirModeloDaChave = async () => {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (!res.ok) return null;
+      const json = await res.json();
+      const validModel = (json.models || []).find(
+        (m) =>
+          m.name.includes('flash') &&
+          !m.name.includes('audio') &&
+          !m.name.includes('image') &&
+          !m.name.includes('tts') &&
+          (m.supportedGenerationMethods || []).includes('generateContent')
+      );
+      return validModel ? validModel.name.replace('models/', '') : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const executarRequisicaoGemini = async (modelName) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -48,47 +79,96 @@ const buscarNaWebComGemini = async (consulta) => {
               {
                 text: `Data de hoje: ${dataHoje} (Local: Fortaleza, CE, Brasil).
 Pesquise no Google em tempo real e responda de forma direta, factual e com dados/números atualizados à seguinte solicitação: "${consulta}".
-Forneça um resumo objetivo de 3 a 5 frases pronto para ser lido em voz alta.`
+Forneça um resumo objetivo de 3 a 4 frases pronto para ser lido em voz alta, sem formatação markdown.`
               }
             ]
           }
         ],
-        tools: [{ googleSearch: {} }],
-        generationConfig: {
-          temperature: 0.2
-        }
+        tools: [{ googleSearch: {} }]
       })
     });
 
     if (!response.ok) {
-      throw new Error(`Status HTTP: ${response.status}`);
+      throw new Error(`HTTP_${response.status}`);
     }
+    return await response.json();
+  };
 
-    const data = await response.json();
-    const candidate = data?.candidates?.[0];
-    const textoResposta =
-      candidate?.content?.parts?.map((p) => p.text).join(' ') ||
-      'Não encontrei resultados recentes para essa busca.';
+  // 1. Tenta com os modelos candidatos
+  for (const model of candidateModels) {
+    try {
+      const data = await executarRequisicaoGemini(model);
+      cachedWorkingModel = model; // Salva em cache o modelo que funcionou!
 
-    const chunks = candidate?.groundingMetadata?.groundingChunks || [];
-    const fontes = chunks
-      .map((c) => c.web?.title)
-      .filter(Boolean)
-      .slice(0, 4);
+      const candidate = data?.candidates?.[0];
+      const textoResposta =
+        candidate?.content?.parts?.map((p) => p.text).join(' ') ||
+        'Não encontrei resultados detalhados para essa busca.';
 
-    return {
-      status: 'sucesso',
-      data_consulta: dataHoje,
-      resultado_atualizado: textoResposta.trim(),
-      fontes_consultadas: fontes
-    };
-  } catch (error) {
-    console.error('[Bastian WebSearch] Erro ao pesquisar na internet:', error);
-    return {
-      status: 'erro',
-      mensagem: 'Não foi possível acessar a busca na web neste instante.'
-    };
+      const chunks = candidate?.groundingMetadata?.groundingChunks || [];
+      const fontes = chunks
+        .map((c) => c.web?.title)
+        .filter(Boolean)
+        .slice(0, 4);
+
+      return {
+        status: 'sucesso',
+        modelo_utilizado: model,
+        data_consulta: dataHoje,
+        resultado_atualizado: textoResposta.trim(),
+        fontes_consultadas: fontes
+      };
+    } catch (err) {
+      console.warn(`[Bastian WebSearch] Modelo ${model} indisponível (${err.message}), tentando próximo...`);
+    }
   }
+
+  // 2. Auto-Descoberta dinâmica se os nomes padrão mudarem
+  try {
+    const discovered = await descobrirModeloDaChave();
+    if (discovered) {
+      const data = await executarRequisicaoGemini(discovered);
+      cachedWorkingModel = discovered;
+      const candidate = data?.candidates?.[0];
+      const textoResposta = candidate?.content?.parts?.map((p) => p.text).join(' ') || '';
+      return {
+        status: 'sucesso',
+        modelo_utilizado: discovered,
+        data_consulta: dataHoje,
+        resultado_atualizado: textoResposta.trim(),
+        fontes_consultadas: ['Google Search']
+      };
+    }
+  } catch (err) {
+    console.warn('[Bastian WebSearch] Falha no modelo autodescoberto:', err);
+  }
+
+  // 3. Fallback Público Direto (Wikipedia PT API) para fatos específicos caso a API bata limite
+  try {
+    const wikiUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(consulta)}&utf8=&format=json&origin=*`;
+    const wikiRes = await fetch(wikiUrl);
+    const wikiData = await wikiRes.json();
+    const snippets = (wikiData?.query?.search || [])
+      .slice(0, 3)
+      .map((item) => `${item.title}: ${item.snippet.replace(/<[^>]*>?/gm, '')}`)
+      .join(' | ');
+
+    if (snippets) {
+      return {
+        status: 'sucesso',
+        data_consulta: dataHoje,
+        resultado_atualizado: snippets,
+        fontes_consultadas: ['Wikipedia PT']
+      };
+    }
+  } catch (wikiErr) {
+    console.error('[Bastian WebSearch] Erro total na busca:', wikiErr);
+  }
+
+  return {
+    status: 'erro',
+    mensagem: 'Não foi possível concluir a pesquisa externa no momento.'
+  };
 };
 
 export default function BarraComandoIA() {
