@@ -1,7 +1,7 @@
 // src/utils/financeUtils.jsx
 import React from 'react';
 import {
-  Briefcase, GraduationCap, Laptop, PiggyBank, TrendingUp, PlusCircle,
+  Briefcase, GraduationCap, Laptop, PiggyBank, TrendingUp,
   Home, ShoppingCart, Utensils, Car, FileText, HeartPulse, BookOpen,
   Tv, Smile, CreditCard, Landmark, Tag
 } from 'lucide-react';
@@ -10,7 +10,7 @@ export const CATEGORIAS_RECEITA = [
   'Bolsa/Auxílio',
   'Salário',
   'Freelance',
-  'Rendimento de Investimento', // <- NOVO: Soma direto na Carteira Investida sem passar pela Conta Corrente!
+  'Rendimento de Investimento',
   'Resgate de Investimento',
   'Outros'
 ];
@@ -103,6 +103,14 @@ export const normalizeDateISO = (dateStr) => {
     if (parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
   return dateStr.substring(0, 10);
+};
+
+export const formatDateToBR = (dateStr) => {
+  if (!dateStr) return '';
+  const iso = normalizeDateISO(dateStr);
+  const [yyyy, mm, dd] = iso.split('-');
+  if (!yyyy || !mm || !dd) return dateStr;
+  return `${dd}/${mm}/${yyyy}`;
 };
 
 export const addMonthsToDate = (isoDateStr, monthsToAdd) => {
