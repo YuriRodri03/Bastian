@@ -1,3 +1,4 @@
+// src/pages/Financeiro.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useFinanceStore } from '../store/useFinanceStore';
 import { useFinanceMetrics } from '../hooks/useFinanceMetrics';
@@ -79,12 +80,16 @@ export default function Financeiro() {
   const [filterMonth, setFilterMonth] = useState(currentMonth);
   const [filterYear, setFilterYear] = useState(currentYear);
 
-  useEffect(() => {
-    if (!editingId) {
-      setCategory(type === 'receita' ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0]);
-      setCartItems([]); 
+  // Troca inteligente de tipo sem sobrescrever quando clicar nos atalhos de investimento
+  const handleSelectType = (newType, presetCategory = null) => {
+    setType(newType);
+    if (presetCategory) {
+      setCategory(presetCategory);
+    } else {
+      setCategory(newType === 'receita' ? CATEGORIAS_RECEITA[0] : CATEGORIAS_DESPESA[0]);
     }
-  }, [type, editingId]);
+    if (!editingId) setCartItems([]);
+  };
 
   // HOOK DE MÉTRICAS E MOTOR FINANCEIRO
   const {
@@ -179,7 +184,6 @@ export default function Financeiro() {
           });
         }
 
-        // Envia tudo em 1 única requisição para o Supabase!
         await addTransaction(batchPayloads);
       }
 
@@ -281,7 +285,7 @@ export default function Financeiro() {
               onChange={(e) => setFilterMonth(e.target.value)}
               className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1.5 hover:text-white transition-colors flex-1"
             >
-              <option value="all" className="bg-slate-900 text-slate-200">Visão Anual</option>
+              <option value="all" className="bg-slate-900 text-slate-200">Ano Inteiro</option>
               {MESES.map(m => (
                 <option key={m.valor} value={m.valor} className="bg-slate-900 text-slate-200">{m.nome}</option>
               ))}
@@ -292,6 +296,7 @@ export default function Financeiro() {
               onChange={(e) => setFilterYear(e.target.value)}
               className="bg-transparent text-base sm:text-sm font-semibold text-slate-200 focus:outline-none cursor-pointer py-1.5 pr-2 sm:pr-4 hover:text-white transition-colors"
             >
+              <option value="all" className="bg-slate-900 text-indigo-300 font-bold">Todo Histórico</option>
               {availableYears.map(year => (
                 <option key={year} value={year} className="bg-slate-900 text-slate-200">{year}</option>
               ))}
@@ -317,7 +322,7 @@ export default function Financeiro() {
             {renderMoney(displayTotalInvestido)}
           </div>
           <div className="text-[10px] sm:text-xs font-semibold mt-1.5 sm:mt-2 text-emerald-200/70 truncate relative z-10">
-            Taxa de Aporte (Mês): <span className="text-emerald-300 font-bold">{taxaPoupancaMes}%</span>
+            Aporte + Rend. (Mês): <span className="text-emerald-300 font-bold">{taxaPoupancaMes}%</span>
           </div>
         </div>
 
@@ -418,10 +423,11 @@ export default function Financeiro() {
             
             <form onSubmit={handleSubmit} className="space-y-4">
               
+              {/* Seletor Receita vs Despesa */}
               <div className="grid grid-cols-2 gap-2.5 p-1 bg-black/40 rounded-2xl border border-white/10">
                 <button
                   type="button"
-                  onClick={() => setType('receita')}
+                  onClick={() => handleSelectType('receita')}
                   className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
                     type === 'receita' 
                       ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 shadow-[0_0_15px_rgba(52,211,153,0.15)]' 
@@ -432,7 +438,7 @@ export default function Financeiro() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setType('despesa')}
+                  onClick={() => handleSelectType('despesa')}
                   className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
                     type === 'despesa' 
                       ? 'bg-rose-500/20 border border-rose-500/40 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.15)]' 
@@ -442,6 +448,40 @@ export default function Financeiro() {
                   <Minus size={15} /> Despesa
                 </button>
               </div>
+
+              {/* ATALHOS RÁPIDOS DE INVESTIMENTO (Aporte vs Rendimento Direto na Carteira) */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectType('despesa', 'Aporte de Investimento')}
+                  className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                    category === 'Aporte de Investimento'
+                      ? 'bg-indigo-500/25 border-indigo-500/50 text-indigo-200 shadow-sm'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                  title="Tira do Saldo em Conta e soma no Total Investido"
+                >
+                  <PiggyBank size={13} className="text-indigo-400 shrink-0" /> Novo Aporte
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectType('receita', 'Rendimento de Investimento')}
+                  className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                    category === 'Rendimento de Investimento'
+                      ? 'bg-emerald-500/25 border-emerald-500/50 text-emerald-200 shadow-sm'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                  title="Soma direto no Total Investido sem alterar o Saldo da Conta Corrente"
+                >
+                  <TrendingUp size={13} className="text-emerald-400 shrink-0" /> Rendimento Direto
+                </button>
+              </div>
+
+              {category === 'Rendimento de Investimento' && (
+                <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-2.5 text-[11px] text-emerald-300 font-medium leading-relaxed">
+                  ✨ <strong>Direto na Carteira:</strong> Este rendimento será somado diretamente ao seu <strong>Total Investido</strong> (e ao ativo informado abaixo), sem precisar lançar um novo aporte depois.
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
@@ -512,7 +552,7 @@ export default function Financeiro() {
 
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
-                    {category.includes('Investimento') ? 'Nome do Ativo (ex: Tesouro Selic)' : 'Descrição'}
+                    {category.includes('Investimento') ? 'Nome do Ativo (ex: CDB Banco Inter / Tesouro Selic)' : 'Descrição'}
                   </label>
                   <input 
                     type="text"
@@ -522,7 +562,7 @@ export default function Financeiro() {
                     className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent transition-all placeholder:text-slate-600"
                     placeholder={
                       category === 'Cartão de Crédito' ? "Ex: Fatura Nubank (Opcional se usar carrinho)" : 
-                      category.includes('Investimento') ? "Ex: CDB Banco Inter" : 
+                      category.includes('Investimento') ? "Use o mesmo nome do ativo da carteira (ex: Reserva CDB)" : 
                       "Ex: Aluguel, Supermercado..."
                     }
                   />
@@ -576,7 +616,7 @@ export default function Financeiro() {
                       className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-base sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer"
                     >
                       <option value={1} className="bg-slate-900">Única (1x)</option>
-                      {[2, 3, 4, 5, 6, 8, 10, 12, 18, 24].map(n => (
+                      {[2, 3, 4, 5, 6, 8, 10, 12, 18, 24, 36, 48, 60].map(n => (
                         <option key={n} value={n} className="bg-slate-900">{n}x Mensais</option>
                       ))}
                     </select>
@@ -754,6 +794,7 @@ export default function Financeiro() {
                   {dayTransactions.map((t) => {
                     const isPendente = (t.status || 'pago') === 'pendente';
                     const isReceita = t.type === 'receita';
+                    const isRendimento = t.category === 'Rendimento de Investimento';
                     const isConfirmingDelete = confirmDeleteId === t.id;
                     const { isFaturaCartao, mainTitle, items: cartaoItens } = parseFaturaDescription(t.description, t.category);
                     
@@ -771,9 +812,14 @@ export default function Financeiro() {
                             </div>
                             
                             <div className="flex items-center gap-1.5 sm:gap-2 mt-1 flex-wrap">
-                              <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[140px] sm:max-w-none">
+                              <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-white/5 text-slate-400 border border-white/10 truncate max-w-[160px] sm:max-w-none">
                                 <Tag size={9} className="shrink-0"/> <span className="truncate">{t.category}</span>
                               </span>
+                              {isRendimento && (
+                                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                  Direto na Carteira
+                                </span>
+                              )}
                               {isPendente && (
                                 <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
                                   {isReceita ? 'A Receber' : 'A Pagar'}

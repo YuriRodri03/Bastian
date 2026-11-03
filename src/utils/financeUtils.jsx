@@ -1,141 +1,140 @@
+// src/utils/financeUtils.jsx
 import React from 'react';
-import { 
-  Home, ShoppingCart, Utensils, Car, Lightbulb, HeartPulse, 
-  GraduationCap, Laptop, PartyPopper, Shirt, CreditCard, 
-  Landmark, Heart, Wrench, Gift, ArrowUpFromLine, Briefcase, 
-  Code, TrendingUp, ArrowDownToLine, RefreshCw, Tag, MoreHorizontal 
+import {
+  Briefcase, GraduationCap, Laptop, PiggyBank, TrendingUp, PlusCircle,
+  Home, ShoppingCart, Utensils, Car, FileText, HeartPulse, BookOpen,
+  Tv, Smile, CreditCard, Landmark, Tag
 } from 'lucide-react';
 
 export const CATEGORIAS_RECEITA = [
-  'Salário', 'Freelance', 'Rendimentos/Dividendos', 'Resgate de Investimento',
-  'Bolsa/Auxílio', 'Cashback', 'Vendas', 'Mesada/Doação', 'Outros'
+  'Bolsa/Auxílio',
+  'Salário',
+  'Freelance',
+  'Rendimento de Investimento', // <- NOVO: Soma direto na Carteira Investida sem passar pela Conta Corrente!
+  'Resgate de Investimento',
+  'Outros'
 ];
 
 export const CATEGORIAS_DESPESA = [
-  'Moradia', 'Mercado', 'Alimentação Fora', 'Transporte', 
-  'Contas Fixas', 'Saúde', 'Educação', 'Assinaturas', 
-  'Lazer', 'Cuidados Pessoais', 'Cartão de Crédito', 
-  'Aporte de Investimento', 'Impostos/Taxas', 'Pets', 'Manutenção', 'Presentes', 'Outros'
+  'Moradia',
+  'Mercado',
+  'Alimentação Fora',
+  'Transporte',
+  'Contas Fixas',
+  'Saúde',
+  'Educação',
+  'Assinaturas',
+  'Lazer',
+  'Cartão de Crédito',
+  'Aporte de Investimento',
+  'Outros'
 ];
 
 export const CORES_GRAFICO = [
-  '#818cf8', '#34d399', '#fbbf24', '#22d3ee', '#a78bfa', 
-  '#f472b6', '#fb7185', '#94a3b8', '#38bdf8', '#f87171'
+  '#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#06b6d4',
+  '#8b5cf6', '#ec4899', '#14b8a6', '#3b82f6', '#eab308'
 ];
 
 export const MESES = [
-  { valor: '01', nome: 'Janeiro' }, { valor: '02', nome: 'Fevereiro' },
-  { valor: '03', nome: 'Março' }, { valor: '04', nome: 'Abril' },
-  { valor: '05', nome: 'Maio' }, { valor: '06', nome: 'Junho' },
-  { valor: '07', nome: 'Julho' }, { valor: '08', nome: 'Agosto' },
-  { valor: '09', nome: 'Setembro' }, { valor: '10', nome: 'Outubro' },
-  { valor: '11', nome: 'Novembro' }, { valor: '12', nome: 'Dezembro' }
+  { valor: '01', nome: 'Janeiro' },
+  { valor: '02', nome: 'Fevereiro' },
+  { valor: '03', nome: 'Março' },
+  { valor: '04', nome: 'Abril' },
+  { valor: '05', nome: 'Maio' },
+  { valor: '06', nome: 'Junho' },
+  { valor: '07', nome: 'Julho' },
+  { valor: '08', nome: 'Agosto' },
+  { valor: '09', nome: 'Setembro' },
+  { valor: '10', nome: 'Outubro' },
+  { valor: '11', nome: 'Novembro' },
+  { valor: '12', nome: 'Dezembro' }
 ];
 
 export const getCategoryIcon = (category) => {
   switch (category) {
-    case 'Moradia': return <Home size={14} className="text-indigo-400" />;
-    case 'Mercado': return <ShoppingCart size={14} className="text-orange-400" />;
-    case 'Alimentação Fora': return <Utensils size={14} className="text-amber-400" />;
-    case 'Transporte': return <Car size={14} className="text-sky-400" />;
-    case 'Contas Fixas': return <Lightbulb size={14} className="text-yellow-400" />;
-    case 'Saúde': return <HeartPulse size={14} className="text-rose-400" />;
-    case 'Educação': return <GraduationCap size={14} className="text-purple-400" />;
-    case 'Assinaturas': return <Laptop size={14} className="text-cyan-400" />;
-    case 'Lazer': return <PartyPopper size={14} className="text-fuchsia-400" />;
-    case 'Cuidados Pessoais': return <Shirt size={14} className="text-pink-400" />;
-    case 'Cartão de Crédito': return <CreditCard size={14} className="text-slate-300" />;
-    case 'Impostos/Taxas': return <Landmark size={14} className="text-slate-400" />;
-    case 'Pets': return <Heart size={14} className="text-red-400" />;
-    case 'Manutenção': return <Wrench size={14} className="text-slate-400" />;
-    case 'Presentes': return <Gift size={14} className="text-rose-300" />;
-    case 'Aporte de Investimento': return <ArrowUpFromLine size={14} className="text-emerald-400" />;
-    
-    case 'Salário': return <Briefcase size={14} className="text-emerald-400" />;
-    case 'Bolsa/Auxílio': return <GraduationCap size={14} className="text-blue-400" />;
-    case 'Freelance': return <Code size={14} className="text-teal-400" />;
-    case 'Rendimentos/Dividendos': return <TrendingUp size={14} className="text-green-400" />;
-    case 'Resgate de Investimento': return <ArrowDownToLine size={14} className="text-amber-400" />;
-    case 'Cashback': return <RefreshCw size={14} className="text-emerald-300" />;
-    case 'Vendas': return <Tag size={14} className="text-indigo-300" />;
-    case 'Mesada/Doação': return <Gift size={14} className="text-purple-300" />;
-    
-    default: return <MoreHorizontal size={14} className="text-slate-400" />;
+    case 'Salário': return <Briefcase size={18} className="text-emerald-400" />;
+    case 'Bolsa/Auxílio': return <GraduationCap size={18} className="text-cyan-400" />;
+    case 'Freelance': return <Laptop size={18} className="text-indigo-400" />;
+    case 'Rendimento de Investimento': return <TrendingUp size={18} className="text-emerald-400" />;
+    case 'Resgate de Investimento': return <Landmark size={18} className="text-teal-400" />;
+    case 'Aporte de Investimento': return <PiggyBank size={18} className="text-emerald-400" />;
+    case 'Moradia': return <Home size={18} className="text-indigo-400" />;
+    case 'Mercado': return <ShoppingCart size={18} className="text-amber-400" />;
+    case 'Alimentação Fora': return <Utensils size={18} className="text-orange-400" />;
+    case 'Transporte': return <Car size={18} className="text-blue-400" />;
+    case 'Contas Fixas': return <FileText size={18} className="text-slate-300" />;
+    case 'Saúde': return <HeartPulse size={18} className="text-rose-400" />;
+    case 'Educação': return <BookOpen size={18} className="text-purple-400" />;
+    case 'Assinaturas': return <Tv size={18} className="text-fuchsia-400" />;
+    case 'Lazer': return <Smile size={18} className="text-pink-400" />;
+    case 'Cartão de Crédito': return <CreditCard size={18} className="text-indigo-400" />;
+    default: return <Tag size={18} className="text-slate-400" />;
   }
 };
 
-// Formatadores Monetários
 export const formatCurrency = (value) => {
-  if (value === null || value === undefined) return '';
-  const valueString = value.toString().replace(/\D/g, '');
-  if (valueString === '') return '';
-  const numericValue = parseFloat(valueString) / 100;
-  return numericValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  if (value === null || value === undefined || value === '') return '';
+  const digits = String(value).replace(/\D/g, '');
+  if (!digits) return '';
+  const numberValue = parseInt(digits, 10) / 100;
+  return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 export const unmaskCurrency = (formattedValue) => {
+  if (typeof formattedValue === 'number') return formattedValue;
   if (!formattedValue) return 0;
-  const valueString = formattedValue.toString().replace(/\D/g, '');
-  if (valueString === '') return 0;
-  return parseFloat(valueString) / 100;
+  const digits = String(formattedValue).replace(/\D/g, '');
+  if (!digits) return 0;
+  return parseInt(digits, 10) / 100;
 };
 
-// Manipuladores de Data
 export const getTodayFormatted = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 };
 
-export const normalizeDateISO = (dateString) => {
-  if (!dateString) return getTodayFormatted();
-  if (dateString.includes('/')) {
-    const [d, m, y] = dateString.split('/');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+export const normalizeDateISO = (dateStr) => {
+  if (!dateStr) return getTodayFormatted();
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
-  return dateString;
+  return dateStr.substring(0, 10);
 };
 
-export const formatDateToBR = (dateString) => {
-  if (!dateString) return '';
-  if (dateString.includes('/')) return dateString; 
-  const [y, m, d] = dateString.split('-');
-  return `${d}/${m}/${y}`;
-};
-
-export const addMonthsToDate = (isoDate, monthsToAdd) => {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const targetDate = new Date(y, m - 1 + monthsToAdd, d);
-  const yyyy = targetDate.getFullYear();
-  const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
-  const dd = String(targetDate.getDate()).padStart(2, '0');
+export const addMonthsToDate = (isoDateStr, monthsToAdd) => {
+  const clean = normalizeDateISO(isoDateStr);
+  const [year, month, day] = clean.split('-').map(Number);
+  const d = new Date(year, month - 1 + monthsToAdd, day);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 };
 
-// Helpers de Fatura do Cartão de Crédito (Serialização / Deserialização)
 export const parseFaturaDescription = (description = '', category = '') => {
-  const isFaturaCartao = category === 'Cartão de Crédito' && description.includes('[');
-  if (!isFaturaCartao) {
-    return { isFaturaCartao: false, mainTitle: description, items: [] };
+  const raw = String(description || '');
+  const markerIndex = raw.indexOf(' [ITENS:');
+  if (markerIndex !== -1 && raw.endsWith(']')) {
+    const mainTitle = raw.substring(0, markerIndex).trim();
+    const jsonPart = raw.substring(markerIndex + 8, raw.length - 1);
+    try {
+      const items = JSON.parse(jsonPart);
+      return { isFaturaCartao: true, mainTitle, items: Array.isArray(items) ? items : [] };
+    } catch {
+      return { isFaturaCartao: category === 'Cartão de Crédito', mainTitle: raw, items: [] };
+    }
   }
-
-  const mainTitle = description.split(' [')[0];
-  const rawItems = description.match(/\[(.*?)\|([0-9.]+)\]/g) || [];
-  const items = rawItems.map((str, idx) => {
-    const clean = str.replace('[', '').replace(']', '');
-    const [nome, valor] = clean.split('|');
-    return { id: Date.now() + idx, nome, valor: Number(valor) };
-  });
-
-  return { isFaturaCartao: true, mainTitle, items };
+  return { isFaturaCartao: false, mainTitle: raw, items: [] };
 };
 
 export const serializeFaturaDescription = (baseDescription, category, cartItems = []) => {
-  if (category === 'Cartão de Crédito' && cartItems.length > 0) {
-    const strItems = cartItems.map(i => `[${i.nome}|${i.valor}]`).join(' ');
-    return `${baseDescription} ${strItems}`;
+  const cleanDesc = String(baseDescription || '').split(' [ITENS:')[0].trim();
+  if (category === 'Cartão de Crédito' && Array.isArray(cartItems) && cartItems.length > 0) {
+    return `${cleanDesc} [ITENS:${JSON.stringify(cartItems)}]`;
   }
-  return baseDescription;
+  return cleanDesc;
 };
