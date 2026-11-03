@@ -123,26 +123,83 @@ export const addMonthsToDate = (isoDateStr, monthsToAdd) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+// Reconhece TODOS os formatos de fatura:
+// 1) "Fatura [{\"id\":1,\"nome\":\"Uber\",\"valor\":20}]" (JSON array direto)
+// 2) "Fatura [ITENS:[{\"id\":1,...}]]"
+// 3) "Fatura [Uber: R$ 20,00 | Ifood: R$ 35,00]" (Texto legado entre colchetes)
 export const parseFaturaDescription = (description = '', category = '') => {
-  const raw = String(description || '');
-  const markerIndex = raw.indexOf(' [ITENS:');
-  if (markerIndex !== -1 && raw.endsWith(']')) {
-    const mainTitle = raw.substring(0, markerIndex).trim();
-    const jsonPart = raw.substring(markerIndex + 8, raw.length - 1);
+  const raw = String(description || '').trim();
+
+  // Caso 1: Formato com tag [ITENS:...]
+  const itensMarker = raw.indexOf(' [ITENS:');
+  if (itensMarker !== -1 && raw.endsWith(']')) {
+    const mainTitle = raw.substring(0, itensMarker).trim();
+    const jsonPart = raw.substring(itensMarker + 8, raw.length - 1);
     try {
       const items = JSON.parse(jsonPart);
-      return { isFaturaCartao: true, mainTitle, items: Array.isArray(items) ? items : [] };
-    } catch {
-      return { isFaturaCartao: category === 'Cartão de Crédito', mainTitle: raw, items: [] };
+      if (Array.isArray(items)) {
+        return { isFaturaCartao: items.length > 0, mainTitle, items };
+      }
+    } catch {}
+  }
+
+  // Caso 2: Formato com JSON Array direto "Titulo [{\"id\":...}]"
+  const jsonArrayMarker = raw.indexOf(' [{');
+  if (jsonArrayMarker !== -1) {
+    const mainTitle = raw.substring(0, jsonArrayMarker).trim();
+    const jsonPart = raw.substring(jsonArrayMarker + 1).trim();
+    try {
+      const items = JSON.parse(jsonPart);
+      if (Array.isArray(items)) {
+        return { isFaturaCartao: items.length > 0, mainTitle, items };
+      }
+    } catch {}
+  }
+
+  // Caso 3: Formato texto entre colchetes "Fatura [Item 1: R$ 10 | Item 2: R$ 20]"
+  const bracketStart = raw.indexOf(' [');
+  if (bracketStart !== -1 && raw.endsWith(']')) {
+    const mainTitle = raw.substring(0, bracketStart).trim();
+    const insideBrackets = raw.substring(bracketStart + 2, raw.length - 1).trim();
+
+    // Tenta parsear caso seja um array JSON válido
+    if (insideBrackets.startsWith('{') || insideBrackets.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(insideBrackets.startsWith('[') ? insideBrackets : `[${insideBrackets}]`);
+        if (Array.isArray(parsed)) {
+          return { isFaturaCartao: parsed.length > 0, mainTitle, items: parsed };
+        }
+      } catch {}
+    }
+
+    // Se for string separada por "|" ou "," (ex: "Uber: R$ 15,00 | Ifood: R$ 40,00")
+    const textParts = insideBrackets.split(/\s*\|\s*|\s*;\s*/).filter(Boolean);
+    if (textParts.length > 0) {
+      const parsedItems = textParts.map((part, idx) => {
+        const [nomePart, valPart] = part.split(':');
+        if (valPart !== undefined) {
+          const cleanVal = parseFloat(valPart.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+          return { id: idx + 1, nome: nomePart.trim(), valor: cleanVal };
+        }
+        return { id: idx + 1, nome: part.trim(), valor: 0 };
+      });
+      return { isFaturaCartao: true, mainTitle, items: parsedItems };
     }
   }
-  return { isFaturaCartao: false, mainTitle: raw, items: [] };
+
+  return {
+    isFaturaCartao: false,
+    mainTitle: raw,
+    items: []
+  };
 };
 
+// Salva no formato limpo e retrocompatível "Titulo [{\"id\":...,\"nome\":...,\"valor\":...}]"
 export const serializeFaturaDescription = (baseDescription, category, cartItems = []) => {
-  const cleanDesc = String(baseDescription || '').split(' [ITENS:')[0].trim();
+  const { mainTitle } = parseFaturaDescription(baseDescription, category);
+  const cleanDesc = mainTitle || 'Fatura Cartão de Crédito';
   if (category === 'Cartão de Crédito' && Array.isArray(cartItems) && cartItems.length > 0) {
-    return `${cleanDesc} [ITENS:${JSON.stringify(cartItems)}]`;
+    return `${cleanDesc} ${JSON.stringify(cartItems)}`;
   }
   return cleanDesc;
 };
