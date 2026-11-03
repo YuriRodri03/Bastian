@@ -1,3 +1,4 @@
+// src/hooks/useFinanceMetrics.js
 import { useMemo } from 'react';
 import { normalizeDateISO, formatDateToBR } from '../utils/financeUtils';
 
@@ -12,29 +13,29 @@ export function useFinanceMetrics({
 }) {
   const currentYear = new Date().getFullYear().toString();
 
-  // 1. Anos disponíveis para o filtro
+  // 1. Anos disponíveis para o filtro (Expandido de -3 até +15 anos à frente + anos das transações)
   const availableYears = useMemo(() => {
     const yearsSet = new Set();
     transactions.forEach(t => {
       if (t.date) {
         const y = t.date.includes('/') ? t.date.split('/')[2] : t.date.split('-')[0];
-        if (y) yearsSet.add(y);
+        if (y && /^\d{4}$/.test(y)) yearsSet.add(y);
       }
     });
     const baseYear = parseInt(currentYear, 10);
-    for (let i = -2; i <= 5; i++) {
+    for (let i = -3; i <= 15; i++) {
       yearsSet.add(String(baseYear + i));
     }
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [transactions, currentYear]);
 
-  // 2. Transações filtradas pelo Mês/Ano selecionado
+  // 2. Transações filtradas pelo Mês/Ano selecionado (Suporta filterYear === 'all')
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.date) return true;
       const iso = normalizeDateISO(t.date);
       const [y, m] = iso.split('-');
-      if (filterYear !== y) return false;
+      if (filterYear !== 'all' && filterYear !== y) return false;
       if (filterMonth !== 'all' && filterMonth !== m) return false;
       return true;
     });
@@ -45,11 +46,25 @@ export function useFinanceMetrics({
     return transactions.reduce((acc, t) => {
       if ((t.status || 'pago') === 'pago') {
         const valor = Number(t.amount) || 0;
-        if (t.type === 'receita') acc.saldoRealTotal += valor;
-        if (t.type === 'despesa') acc.saldoRealTotal -= valor;
+        const isAporte = t.category === 'Aporte de Investimento';
+        const isRendimento = t.category === 'Rendimento de Investimento';
+        const isResgate = t.category === 'Resgate de Investimento';
+
+        // Saldo em Conta Corrente: Rendimentos reinvestidos NÃO entram no saldo da conta
+        if (t.type === 'receita' && !isRendimento) {
+          acc.saldoRealTotal += valor;
+        }
+        if (t.type === 'despesa') {
+          acc.saldoRealTotal -= valor;
+        }
         
-        if (t.category === 'Aporte de Investimento') acc.investidoRealTotal += valor;
-        if (t.category === 'Resgate de Investimento') acc.investidoRealTotal -= valor;
+        // Total Investido na Carteira: Soma tanto Aportes quanto Rendimentos Diretos
+        if (isAporte || isRendimento) {
+          acc.investidoRealTotal += valor;
+        }
+        if (isResgate) {
+          acc.investidoRealTotal -= valor;
+        }
       }
       return acc;
     }, { saldoRealTotal: 0, investidoRealTotal: 0 });
@@ -61,14 +76,23 @@ export function useFinanceMetrics({
       const tStatus = t.status || 'pago';
       const valor = Number(t.amount) || 0;
       const isAporte = t.category === 'Aporte de Investimento';
+      const isRendimento = t.category === 'Rendimento de Investimento';
       const isResgate = t.category === 'Resgate de Investimento';
       
       if (t.type === 'receita') {
         if (tStatus === 'pago') {
-          if (!isResgate) acc.receitasPagas += valor;
+          if (isRendimento) {
+            acc.rendimentosPagosMes += valor;
+          } else if (!isResgate) {
+            acc.receitasPagas += valor;
+          }
         } else {
-          acc.aReceber += valor;
-          if (isResgate) acc.resgatesPendentesMes += valor;
+          if (isRendimento) {
+            acc.rendimentosPendentesMes += valor;
+          } else {
+            acc.aReceber += valor;
+            if (isResgate) acc.resgatesPendentesMes += valor;
+          }
         }
       } else {
         if (tStatus === 'pago') {
@@ -81,14 +105,23 @@ export function useFinanceMetrics({
       }
       return acc;
     }, { 
-      receitasPagas: 0, despesasPagas: 0, aPagar: 0, aReceber: 0, 
-      aportesPagosMes: 0, aportesPendentesMes: 0, resgatesPendentesMes: 0 
+      receitasPagas: 0, 
+      despesasPagas: 0, 
+      aPagar: 0, 
+      aReceber: 0, 
+      aportesPagosMes: 0, 
+      aportesPendentesMes: 0, 
+      rendimentosPagosMes: 0,
+      rendimentosPendentesMes: 0,
+      resgatesPendentesMes: 0 
     });
   }, [filteredTransactions]);
 
   const {
     receitasPagas, despesasPagas, aPagar, aReceber,
-    aportesPagosMes, aportesPendentesMes, resgatesPendentesMes
+    aportesPagosMes, aportesPendentesMes,
+    rendimentosPagosMes, rendimentosPendentesMes,
+    resgatesPendentesMes
   } = periodMetrics;
 
   // 5. Consolidação para exibição nos Cards
@@ -104,13 +137,15 @@ export function useFinanceMetrics({
     : saldoRealTotal;
 
   const displayTotalInvestido = isProjected
-    ? investidoRealTotal + aportesPendentesMes - resgatesPendentesMes
+    ? investidoRealTotal + aportesPendentesMes + rendimentosPendentesMes - resgatesPendentesMes
     : investidoRealTotal;
 
-  const aportesTotaisMes = isProjected ? (aportesPagosMes + aportesPendentesMes) : aportesPagosMes;
+  const aportesTotaisMes = isProjected 
+    ? (aportesPagosMes + aportesPendentesMes + rendimentosPagosMes + rendimentosPendentesMes) 
+    : (aportesPagosMes + rendimentosPagosMes);
   const taxaPoupancaMes = displayReceitas > 0 ? Math.round((aportesTotaisMes / displayReceitas) * 100) : 0;
 
-  // 6. Detalhamento da Carteira e Gráfico
+  // 6. Detalhamento da Carteira e Gráfico (Aportes + Rendimentos - Resgates por Ativo)
   const carteiraInvestimentos = useMemo(() => {
     const ativos = {};
     transactions.forEach(t => {
@@ -119,8 +154,8 @@ export function useFinanceMetrics({
       const deveContar = isProjected ? (isPaid || isPendingInFilter) : isPaid;
 
       if (deveContar) {
-        const nomeAtivo = t.description.trim();
-        if (t.category === 'Aporte de Investimento') {
+        const nomeAtivo = (t.description || '').split(' [')[0].trim() || 'Ativo Geral';
+        if (t.category === 'Aporte de Investimento' || t.category === 'Rendimento de Investimento') {
           ativos[nomeAtivo] = (ativos[nomeAtivo] || 0) + Number(t.amount);
         } else if (t.category === 'Resgate de Investimento') {
           ativos[nomeAtivo] = (ativos[nomeAtivo] || 0) - Number(t.amount);
@@ -140,7 +175,10 @@ export function useFinanceMetrics({
     const listFilter = filteredTransactions.filter(t => {
       const matchType = t.type === chartType;
       const matchStatus = isProjected ? true : (t.status || 'pago') === 'pago';
-      const isNotInvestmentTransfer = t.category !== 'Aporte de Investimento' && t.category !== 'Resgate de Investimento';
+      const isNotInvestmentTransfer = 
+        t.category !== 'Aporte de Investimento' && 
+        t.category !== 'Resgate de Investimento' &&
+        t.category !== 'Rendimento de Investimento';
       return matchType && matchStatus && isNotInvestmentTransfer;
     });
 
@@ -163,8 +201,8 @@ export function useFinanceMetrics({
       .filter(t => {
         const query = searchTerm.toLowerCase().trim();
         const matchesSearch = !query || 
-          t.description.toLowerCase().includes(query) || 
-          t.category.toLowerCase().includes(query);
+          (t.description || '').toLowerCase().includes(query) || 
+          (t.category || '').toLowerCase().includes(query);
         const matchesStatus = statusFilter === 'todos' ? true : (t.status || 'pago') === statusFilter;
         return matchesSearch && matchesStatus;
       })

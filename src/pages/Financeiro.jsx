@@ -154,8 +154,19 @@ export default function Financeiro() {
     if (category === 'Cartão de Crédito' && cartItems.length > 0 && !baseDescription) {
       baseDescription = 'Fatura Cartão de Crédito';
     }
+    if (category === 'Rendimento de Investimento' && !baseDescription) {
+      baseDescription = 'Rendimento da Carteira';
+    }
 
     if (!numericAmount || !baseDescription) return;
+
+    // Garante consistência absoluta entre Tipo e Categoria de Investimento
+    const finalType =
+      category === 'Rendimento de Investimento' || category === 'Resgate de Investimento'
+        ? 'receita'
+        : category === 'Aporte de Investimento'
+          ? 'despesa'
+          : type;
 
     try {
       if (editingId) {
@@ -163,7 +174,7 @@ export default function Financeiro() {
           id: editingId,
           amount: numericAmount,
           description: serializeFaturaDescription(baseDescription, category, cartItems),
-          type,
+          type: finalType,
           category,
           date,
           status
@@ -177,7 +188,7 @@ export default function Financeiro() {
           batchPayloads.push({
             amount: numericAmount,
             description: serializeFaturaDescription(parcelDesc, category, cartItems),
-            type,
+            type: finalType,
             category,
             date: i === 0 ? date : addMonthsToDate(date, i),
             status: i === 0 ? status : 'pendente'

@@ -1,3 +1,4 @@
+// src/store/useFinanceStore.js
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 
@@ -8,11 +9,25 @@ const calculateStoreTotals = (transactions = []) => {
       const isRealized = (t.status || 'pago') === 'pago';
       if (isRealized) {
         const val = Number(t.amount) || 0;
-        if (t.type === 'receita') acc.balance += val;
-        if (t.type === 'despesa') acc.balance -= val;
+        const isAporte = t.category === 'Aporte de Investimento';
+        const isRendimento = t.category === 'Rendimento de Investimento';
+        const isResgate = t.category === 'Resgate de Investimento';
 
-        if (t.category === 'Aporte de Investimento') acc.investedBalance += val;
-        if (t.category === 'Resgate de Investimento') acc.investedBalance -= val;
+        // 1. Saldo em Conta Corrente (Rendimentos reinvestidos ficam direto na carteira, não entram na conta!)
+        if (t.type === 'receita' && !isRendimento) {
+          acc.balance += val;
+        }
+        if (t.type === 'despesa') {
+          acc.balance -= val;
+        }
+
+        // 2. Total Investido na Carteira (Soma Aportes + Rendimentos Diretos e subtrai Resgates)
+        if (isAporte || isRendimento) {
+          acc.investedBalance += val;
+        }
+        if (isResgate) {
+          acc.investedBalance -= val;
+        }
       }
       return acc;
     },
@@ -117,7 +132,7 @@ export const useFinanceStore = create((set, get) => ({
 
     const currentTransactions = get().transactions;
     const newTransactions = currentTransactions.map((t) =>
-      t.id === data.id ? data : t
+      String(t.id) === String(data.id) ? data : t
     );
     const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
@@ -141,7 +156,7 @@ export const useFinanceStore = create((set, get) => ({
     }
 
     const currentTransactions = get().transactions;
-    const newTransactions = currentTransactions.filter((t) => t.id !== id);
+    const newTransactions = currentTransactions.filter((t) => String(t.id) !== String(id));
     const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
     set({
@@ -153,7 +168,7 @@ export const useFinanceStore = create((set, get) => ({
 
   // 5. Alternar Status Rápido
   toggleTransactionStatus: async (id) => {
-    const transaction = get().transactions.find((t) => t.id === id);
+    const transaction = get().transactions.find((t) => String(t.id) === String(id));
     if (!transaction) return;
 
     const currentStatus = transaction.status || 'pago';
@@ -162,7 +177,7 @@ export const useFinanceStore = create((set, get) => ({
     const { data, error } = await supabase
       .from('transactions')
       .update({ status: newStatus })
-      .eq('id', id)
+      .eq('id', transaction.id)
       .select()
       .single();
 
@@ -173,7 +188,7 @@ export const useFinanceStore = create((set, get) => ({
 
     const currentTransactions = get().transactions;
     const newTransactions = currentTransactions.map((t) =>
-      t.id === id ? data : t
+      String(t.id) === String(transaction.id) ? data : t
     );
     const { balance, investedBalance } = calculateStoreTotals(newTransactions);
 
