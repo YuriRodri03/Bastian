@@ -6,12 +6,22 @@ import {
   Tv, Smile, CreditCard, Landmark, Tag
 } from 'lucide-react';
 
+/* ------------------------------------------------------------------ */
+/* Constantes                                                          */
+/* ------------------------------------------------------------------ */
+
+// Nomes especiais usados na lógica (evita strings repetidas em vários arquivos)
+export const CATEGORIA_CARTAO = 'Cartão de Crédito';
+export const CATEGORIA_APORTE = 'Aporte de Investimento';
+export const CATEGORIA_RENDIMENTO = 'Rendimento de Investimento';
+export const CATEGORIA_RESGATE = 'Resgate de Investimento';
+
 export const CATEGORIAS_RECEITA = [
   'Bolsa/Auxílio',
   'Salário',
   'Freelance',
-  'Rendimento de Investimento',
-  'Resgate de Investimento',
+  CATEGORIA_RENDIMENTO,
+  CATEGORIA_RESGATE,
   'Outros'
 ];
 
@@ -25,8 +35,8 @@ export const CATEGORIAS_DESPESA = [
   'Educação',
   'Assinaturas',
   'Lazer',
-  'Cartão de Crédito',
-  'Aporte de Investimento',
+  CATEGORIA_CARTAO,
+  CATEGORIA_APORTE,
   'Outros'
 ];
 
@@ -50,156 +60,183 @@ export const MESES = [
   { valor: '12', nome: 'Dezembro' }
 ];
 
-export const getCategoryIcon = (category) => {
-  switch (category) {
-    case 'Salário': return <Briefcase size={18} className="text-emerald-400" />;
-    case 'Bolsa/Auxílio': return <GraduationCap size={18} className="text-cyan-400" />;
-    case 'Freelance': return <Laptop size={18} className="text-indigo-400" />;
-    case 'Rendimento de Investimento': return <TrendingUp size={18} className="text-emerald-400" />;
-    case 'Resgate de Investimento': return <Landmark size={18} className="text-teal-400" />;
-    case 'Aporte de Investimento': return <PiggyBank size={18} className="text-emerald-400" />;
-    case 'Moradia': return <Home size={18} className="text-indigo-400" />;
-    case 'Mercado': return <ShoppingCart size={18} className="text-amber-400" />;
-    case 'Alimentação Fora': return <Utensils size={18} className="text-orange-400" />;
-    case 'Transporte': return <Car size={18} className="text-blue-400" />;
-    case 'Contas Fixas': return <FileText size={18} className="text-slate-300" />;
-    case 'Saúde': return <HeartPulse size={18} className="text-rose-400" />;
-    case 'Educação': return <BookOpen size={18} className="text-purple-400" />;
-    case 'Assinaturas': return <Tv size={18} className="text-fuchsia-400" />;
-    case 'Lazer': return <Smile size={18} className="text-pink-400" />;
-    case 'Cartão de Crédito': return <CreditCard size={18} className="text-indigo-400" />;
-    default: return <Tag size={18} className="text-slate-400" />;
-  }
+/* ------------------------------------------------------------------ */
+/* Ícones                                                              */
+/* ------------------------------------------------------------------ */
+
+// Classes escritas por extenso para o Tailwind detectá-las
+const CATEGORY_ICONS = {
+  'Salário': [Briefcase, 'text-emerald-400'],
+  'Bolsa/Auxílio': [GraduationCap, 'text-cyan-400'],
+  'Freelance': [Laptop, 'text-indigo-400'],
+  [CATEGORIA_RENDIMENTO]: [TrendingUp, 'text-emerald-400'],
+  [CATEGORIA_RESGATE]: [Landmark, 'text-teal-400'],
+  [CATEGORIA_APORTE]: [PiggyBank, 'text-emerald-400'],
+  'Moradia': [Home, 'text-indigo-400'],
+  'Mercado': [ShoppingCart, 'text-amber-400'],
+  'Alimentação Fora': [Utensils, 'text-orange-400'],
+  'Transporte': [Car, 'text-blue-400'],
+  'Contas Fixas': [FileText, 'text-slate-300'],
+  'Saúde': [HeartPulse, 'text-rose-400'],
+  'Educação': [BookOpen, 'text-purple-400'],
+  'Assinaturas': [Tv, 'text-fuchsia-400'],
+  'Lazer': [Smile, 'text-pink-400'],
+  [CATEGORIA_CARTAO]: [CreditCard, 'text-indigo-400']
 };
 
+export const getCategoryIcon = (category) => {
+  const [Icon, color] = CATEGORY_ICONS[category] || [Tag, 'text-slate-400'];
+  return <Icon size={18} className={color} />;
+};
+
+/* ------------------------------------------------------------------ */
+/* Moeda                                                               */
+/* ------------------------------------------------------------------ */
+
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// 12 dígitos = até R$ 9.999.999.999,99. Acima disso o parseInt perderia precisão.
+const MAX_DIGITS = 12;
+const onlyDigits = (value) => String(value).replace(/\D/g, '').slice(0, MAX_DIGITS);
+
+// Máscara de digitação: "1234" -> "R$ 12,34"
 export const formatCurrency = (value) => {
   if (value === null || value === undefined || value === '') return '';
-  const digits = String(value).replace(/\D/g, '');
+  const digits = onlyDigits(value);
   if (!digits) return '';
-  const numberValue = parseInt(digits, 10) / 100;
-  return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return BRL.format(parseInt(digits, 10) / 100);
 };
 
+// Só deve receber texto vindo da máscara acima (ou um número já pronto)
 export const unmaskCurrency = (formattedValue) => {
   if (typeof formattedValue === 'number') return formattedValue;
   if (!formattedValue) return 0;
-  const digits = String(formattedValue).replace(/\D/g, '');
-  if (!digits) return 0;
-  return parseInt(digits, 10) / 100;
+  const digits = onlyDigits(formattedValue);
+  return digits ? parseInt(digits, 10) / 100 : 0;
 };
 
-export const getTodayFormatted = () => {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
+/* ------------------------------------------------------------------ */
+/* Datas                                                               */
+/* ------------------------------------------------------------------ */
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const toLocalISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+// Data local (não usa toISOString, que é UTC e vira "amanhã" à noite no Brasil)
+export const getTodayFormatted = () => toLocalISO(new Date());
 
 export const normalizeDateISO = (dateStr) => {
   if (!dateStr) return getTodayFormatted();
-  if (dateStr.includes('/')) {
-    const parts = dateStr.split('/');
-    if (parts.length === 3) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+  if (dateStr instanceof Date) {
+    return Number.isNaN(dateStr.getTime()) ? getTodayFormatted() : toLocalISO(dateStr);
   }
-  return dateStr.substring(0, 10);
+  const str = String(dateStr).trim();
+  if (str.includes('/')) {
+    const [d, m, y] = str.split('/');
+    if (d && m && y) return `${y.slice(0, 4)}-${pad2(m)}-${pad2(d)}`;
+  }
+  return str.substring(0, 10);
 };
 
 export const formatDateToBR = (dateStr) => {
   if (!dateStr) return '';
-  const iso = normalizeDateISO(dateStr);
-  const [yyyy, mm, dd] = iso.split('-');
-  if (!yyyy || !mm || !dd) return dateStr;
+  const [yyyy, mm, dd] = normalizeDateISO(dateStr).split('-');
+  if (!yyyy || !mm || !dd) return String(dateStr);
   return `${dd}/${mm}/${yyyy}`;
 };
 
+// Soma meses mantendo o dia, limitado ao último dia do mês de destino.
+// Antes: 31/01 + 1 mês virava 03/03 (Fev 31 "transborda"), pulando fevereiro.
 export const addMonthsToDate = (isoDateStr, monthsToAdd) => {
   const clean = normalizeDateISO(isoDateStr);
   const [year, month, day] = clean.split('-').map(Number);
-  const d = new Date(year, month - 1 + monthsToAdd, day);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  if ([year, month, day].some(Number.isNaN)) return clean;
+
+  const target = new Date(year, month - 1 + monthsToAdd, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return toLocalISO(target);
 };
 
-// Reconhece TODOS os formatos de fatura:
-// 1) "Fatura [{\"id\":1,\"nome\":\"Uber\",\"valor\":20}]" (JSON array direto)
-// 2) "Fatura [ITENS:[{\"id\":1,...}]]"
-// 3) "Fatura [Uber: R$ 20,00 | Ifood: R$ 35,00]" (Texto legado entre colchetes)
-export const parseFaturaDescription = (description = '', category = '') => {
-  const raw = String(description || '').trim();
+/* ------------------------------------------------------------------ */
+/* Descrição de fatura                                                 */
+/* ------------------------------------------------------------------ */
 
-  // Caso 1: Formato com tag [ITENS:...]
+// Garante que todo item tenha id, nome (string) e valor (número)
+const normalizeItems = (list) =>
+  list
+    .filter((it) => it && typeof it === 'object')
+    .map((it, idx) => ({
+      ...it,
+      id: it.id ?? idx + 1,
+      nome: String(it.nome ?? '').trim(),
+      valor: Number(it.valor) || 0
+    }));
+
+const tryParseItems = (text) => {
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? normalizeItems(parsed) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Reconhece os formatos de fatura:
+// 1) "Fatura [ITENS:[{...}]]"
+// 2) "Fatura [{...}]"  (formato atual, JSON direto)
+// 3) "Fatura [Uber: R$ 20,00 | Ifood: R$ 35,00]"  (legado; SÓ para a categoria Cartão de Crédito,
+//    senão uma descrição comum como "Aluguel [apto 12]" viraria uma fatura)
+export const parseFaturaDescription = (description = '', category = '') => {
+  const raw = String(description ?? '').trim();
+  const found = (mainTitle, items) => ({ isFaturaCartao: items.length > 0, mainTitle, items });
+
   const itensMarker = raw.indexOf(' [ITENS:');
   if (itensMarker !== -1 && raw.endsWith(']')) {
-    const mainTitle = raw.substring(0, itensMarker).trim();
-    const jsonPart = raw.substring(itensMarker + 8, raw.length - 1);
-    try {
-      const items = JSON.parse(jsonPart);
-      if (Array.isArray(items)) {
-        return { isFaturaCartao: items.length > 0, mainTitle, items };
-      }
-    } catch {}
+    const items = tryParseItems(raw.slice(itensMarker + 8, -1));
+    if (items) return found(raw.slice(0, itensMarker).trim(), items);
   }
 
-  // Caso 2: Formato com JSON Array direto "Titulo [{\"id\":...}]"
-  const jsonArrayMarker = raw.indexOf(' [{');
-  if (jsonArrayMarker !== -1) {
-    const mainTitle = raw.substring(0, jsonArrayMarker).trim();
-    const jsonPart = raw.substring(jsonArrayMarker + 1).trim();
-    try {
-      const items = JSON.parse(jsonPart);
-      if (Array.isArray(items)) {
-        return { isFaturaCartao: items.length > 0, mainTitle, items };
-      }
-    } catch {}
+  const jsonMarker = raw.indexOf(' [{');
+  if (jsonMarker !== -1 && raw.endsWith(']')) {
+    const items = tryParseItems(raw.slice(jsonMarker + 1));
+    if (items) return found(raw.slice(0, jsonMarker).trim(), items);
   }
 
-  // Caso 3: Formato texto entre colchetes "Fatura [Item 1: R$ 10 | Item 2: R$ 20]"
-  const bracketStart = raw.indexOf(' [');
-  if (bracketStart !== -1 && raw.endsWith(']')) {
-    const mainTitle = raw.substring(0, bracketStart).trim();
-    const insideBrackets = raw.substring(bracketStart + 2, raw.length - 1).trim();
+  if (category === CATEGORIA_CARTAO) {
+    const bracketStart = raw.indexOf(' [');
+    if (bracketStart !== -1 && raw.endsWith(']')) {
+      const inside = raw.slice(bracketStart + 2, -1).trim();
+      // JSON quebrado não vira item falso: mostra o texto original
+      const looksLikeJson = /^(ITENS:|[{[])/.test(inside);
+      const parts = looksLikeJson ? [] : inside.split(/\s*[|;]\s*/).filter(Boolean);
 
-    // Tenta parsear caso seja um array JSON válido
-    if (insideBrackets.startsWith('{') || insideBrackets.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(insideBrackets.startsWith('[') ? insideBrackets : `[${insideBrackets}]`);
-        if (Array.isArray(parsed)) {
-          return { isFaturaCartao: parsed.length > 0, mainTitle, items: parsed };
-        }
-      } catch {}
-    }
-
-    // Se for string separada por "|" ou "," (ex: "Uber: R$ 15,00 | Ifood: R$ 40,00")
-    const textParts = insideBrackets.split(/\s*\|\s*|\s*;\s*/).filter(Boolean);
-    if (textParts.length > 0) {
-      const parsedItems = textParts.map((part, idx) => {
-        const [nomePart, valPart] = part.split(':');
-        if (valPart !== undefined) {
-          const cleanVal = parseFloat(valPart.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
-          return { id: idx + 1, nome: nomePart.trim(), valor: cleanVal };
-        }
-        return { id: idx + 1, nome: part.trim(), valor: 0 };
-      });
-      return { isFaturaCartao: true, mainTitle, items: parsedItems };
+      if (parts.length > 0) {
+        const items = parts.map((part, idx) => {
+          const sep = part.lastIndexOf(':'); // nomes podem conter ":"
+          if (sep === -1) return { id: idx + 1, nome: part.trim(), valor: 0 };
+          const valor = parseFloat(part.slice(sep + 1).replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+          return { id: idx + 1, nome: part.slice(0, sep).trim(), valor };
+        });
+        return found(raw.slice(0, bracketStart).trim(), items);
+      }
     }
   }
 
-  return {
-    isFaturaCartao: false,
-    mainTitle: raw,
-    items: []
-  };
+  return { isFaturaCartao: false, mainTitle: raw, items: [] };
 };
 
-// Salva no formato limpo e retrocompatível "Titulo [{\"id\":...,\"nome\":...,\"valor\":...}]"
+// Salva no formato "Titulo [{"id":...,"nome":...,"valor":...}]"
 export const serializeFaturaDescription = (baseDescription, category, cartItems = []) => {
-  const { mainTitle } = parseFaturaDescription(baseDescription, category);
-  const cleanDesc = mainTitle || 'Fatura Cartão de Crédito';
-  if (category === 'Cartão de Crédito' && Array.isArray(cartItems) && cartItems.length > 0) {
-    return `${cleanDesc} ${JSON.stringify(cartItems)}`;
+  // Sem categoria: só remove um sufixo JSON já existente, sem interpretar "[texto]" digitado pelo usuário
+  const { mainTitle } = parseFaturaDescription(baseDescription);
+  const isCard = category === CATEGORIA_CARTAO;
+  // O título padrão de fatura só vale para cartão (antes qualquer categoria vazia virava "Fatura...")
+  const cleanDesc = mainTitle || (isCard ? 'Fatura Cartão de Crédito' : '');
+
+  if (isCard && Array.isArray(cartItems) && cartItems.length > 0) {
+    const items = cartItems.map(({ id, nome, valor }) => ({ id, nome, valor }));
+    return `${cleanDesc} ${JSON.stringify(items)}`;
   }
   return cleanDesc;
 };
