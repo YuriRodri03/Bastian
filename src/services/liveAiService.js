@@ -49,6 +49,8 @@ export class GeminiLiveConnection {
     this.onFunctionCall = onFunctionCall;
     this.onInterrupted = opcoes.onInterrupted;
     this.onClose = opcoes.onClose; // só dispara em queda inesperada que não deu para recuperar
+    this.onToolCancelled = opcoes.onToolCancelled; // o servidor cancelou uma chamada de ferramenta em andamento
+    this.chamadasCanceladas = new Set(); // ids que não devem mais receber resposta
 
     this.ws = null;
     this.contexto = ''; // string ou função que devolve o snapshot atual do sistema
@@ -400,6 +402,11 @@ ${contextoDoSistema || 'Use a ferramenta consultar_dados se precisar ler dados a
   }
 
   enviarRespostaDeFuncao(idChamada, nomeFuncao, resultadoObj) {
+    // Chamada cancelada pelo servidor (o turno foi interrompido): responder agora seria ignorado ou gerar erro
+    if (this.chamadasCanceladas.delete(idChamada)) {
+      console.log('[Bastian Core] Resposta descartada: a chamada foi cancelada pelo servidor.', nomeFuncao);
+      return;
+    }
     const safeResponse =
       resultadoObj && typeof resultadoObj === 'object' && !Array.isArray(resultadoObj)
         ? resultadoObj
@@ -496,7 +503,10 @@ ${contextoDoSistema || 'Use a ferramenta consultar_dados se precisar ler dados a
     }
 
     if (resposta.toolCallCancellation) {
-      console.warn('[Bastian Core] Chamadas canceladas pelo servidor:', resposta.toolCallCancellation.ids);
+      const ids = resposta.toolCallCancellation.ids || [];
+      console.warn(`[Bastian Core] ${ids.length} chamada(s) cancelada(s) pelo servidor: ${ids.join(', ')}`);
+      ids.forEach((id) => this.chamadasCanceladas.add(id));
+      this.seguro(this.onToolCancelled, ids);
     }
   }
 }

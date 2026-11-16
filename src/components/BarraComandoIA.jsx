@@ -11,6 +11,7 @@ import { useInboxStore } from '../store/useInboxStore';
 import { useKanbanStore } from '../store/useKanbanStore';
 import { useFitnessStore } from '../store/useFitnessStore';
 import { useChatStore } from '../store/useChatStore';
+import { buscarNaWebComGemini } from '../services/webSearchService';
 
 import {
   CATEGORIAS_RECEITA,
@@ -184,7 +185,7 @@ const buscarNoticias = async (termo) => {
       ? `https://news.google.com/rss/search?q=${encodeURIComponent(queryLimpa)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`
       : 'https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
-  const data = await fetchJson(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`);
+  const data = await fetchJson(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`, 4000);
   const manchetes = (data?.items || []).slice(0, 4).map((item, i) => `${i + 1}. ${item.title}`).join(' | ');
   return manchetes ? { texto: `Principais manchetes recentes no Google Notícias: ${manchetes}`, fonte: 'Google News BR' } : null;
 };
@@ -768,7 +769,9 @@ const executarFerramenta = async (name, args, ctx) => {
     case 'pesquisar_internet': {
       const consulta = String(args.consulta || args.query || '').trim();
       ctx.exibirMensagem(`🌐 Pesquisando na web: "${consulta}"...`);
-      const resultado = await buscarNaWeb(consulta);
+      // Primeiro o Google Search (Edge Function); se der limite de uso, erro ou resposta sem fontes, cai nas APIs públicas
+      let resultado = await buscarNaWebComGemini(consulta);
+      if (resultado.status !== 'sucesso') resultado = await buscarNaWeb(consulta);
       if (resultado.fontes_consultadas?.length) ctx.exibirMensagem(`🌐 Fonte: ${resultado.fontes_consultadas[0]}`);
       return resultado;
     }
@@ -894,11 +897,15 @@ export default function BarraComandoIA() {
 
       const aoComecarFalar = () => {
         if (!ativa()) return;
-        if (aiStateRef.current === 'speaking' || aiStateRef.current === 'processing') {
+        // Só interrompe a IA quando ela está FALANDO. Durante 'processing' (ex.: uma pesquisa em andamento),
+        // qualquer ruído acionava interromperGeracao() e o servidor cancelava a chamada da ferramenta.
+        if (aiStateRef.current === 'speaking') {
           audioManagerRef.current?.pararAudioAtual();
           liveConnectionRef.current?.interromperGeracao();
         }
-        updateAiState('listening');
+        // Em 'processing' o estado não muda: voltar para 'listening' faria o silêncio seguinte enviar
+        // forcarResposta(), que também interrompe o turno e cancela a ferramenta.
+        if (aiStateRef.current !== 'processing') updateAiState('listening');
       };
 
       const aoReceberAudioDaIA = (base64Audio) => {
@@ -952,6 +959,10 @@ export default function BarraComandoIA() {
         // O usuário falou por cima da IA: para o áudio que ainda estava na fila
         onInterrupted: () => {
           if (ativa()) audioManagerRef.current?.pararAudioAtual();
+        },
+        // O servidor cancelou a ferramenta em andamento: não há mais o que esperar, volta a ouvir
+        onToolCancelled: () => {
+          if (ativa() && aiStateRef.current === 'processing') updateAiState('listening');
         },
         // A conexão caiu e não foi possível retomar a sessão: desliga de forma limpa e avisa
         onClose: () => {
