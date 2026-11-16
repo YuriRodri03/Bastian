@@ -1,6 +1,77 @@
 // src/services/audioManager.js
 
 const VOICE_PROFILE_KEY = 'bastian_yuri_voice_profile';
+const PROFILE_VERSION = 2; // perfis antigos (pitch por pico espectral) não são comparáveis: recalibra uma vez
+
+const VAD_INTERVAL_MS = 16; // ~60 vezes por segundo, como o requestAnimationFrame antigo
+const SILENCE_MS = 800; // pausa que encerra uma fala
+const CHUNK_SAMPLES = 512; // 32 ms por pacote enviado (antes: 8 ms, ~125 mensagens/s)
+
+const MIN_FRAMES_AVALIACAO = 5; // menos que isso: fala curta demais para julgar
+const MIN_FRAMES_CALIBRACAO = 15; // calibrar exige uma fala de verdade, não um ruído ou um "ok"
+const CONTINUIDADE_MS = 6000; // fala curta logo após um visitante continua sendo tratada como dele
+
+const LIMITE_SIMILARIDADE = 68;
+const LIMITE_APRENDIZADO = 82;
+
+/* ------------------------------------------------------------------ */
+/* Helpers de sinal                                                    */
+/* ------------------------------------------------------------------ */
+
+const mediana = (valores) => {
+  const ordenados = [...valores].sort((a, b) => a - b);
+  const meio = Math.floor(ordenados.length / 2);
+  return ordenados.length % 2 ? ordenados[meio] : (ordenados[meio - 1] + ordenados[meio]) / 2;
+};
+
+// Pitch por autocorrelação normalizada (70 a 400 Hz).
+// O método antigo pegava o bin mais forte entre 80 e 320 Hz, que muitas vezes é o 2º harmônico:
+// o pitch pulava uma oitava de um quadro para outro e vozes agudas ficavam fora da faixa.
+export const estimarPitch = (buf, sampleRate) => {
+  const N = buf.length;
+  let soma = 0;
+  for (let i = 0; i < N; i++) soma += buf[i] * buf[i];
+  const rms = Math.sqrt(soma / N);
+  if (rms < 0.015) return null; // quase silêncio
+
+  const minLag = Math.floor(sampleRate / 400);
+  const maxLag = Math.floor(sampleRate / 70);
+  const corr = new Float32Array(maxLag + 2);
+  let melhor = 0;
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let c = 0;
+    let e1 = 0;
+    let e2 = 0;
+    for (let i = 0; i < N - lag; i++) {
+      c += buf[i] * buf[i + lag];
+      e1 += buf[i] * buf[i];
+      e2 += buf[i + lag] * buf[i + lag];
+    }
+    const n = c / (Math.sqrt(e1 * e2) || 1);
+    corr[lag] = n;
+    if (n > melhor) melhor = n;
+  }
+
+  if (melhor < 0.55) return null; // ruído ou som sem vozeamento (s, f, teclado, ventilador)
+
+  // Menor período com correlação quase tão boa quanto a melhor: evita escolher múltiplos do período
+  for (let lag = minLag + 1; lag < maxLag; lag++) {
+    if (corr[lag] >= 0.85 * melhor && corr[lag] >= corr[lag - 1] && corr[lag] >= corr[lag + 1]) {
+      const a = corr[lag - 1];
+      const b = corr[lag];
+      const c = corr[lag + 1];
+      const den = a - 2 * b + c;
+      const delta = den !== 0 ? (0.5 * (a - c)) / den : 0;
+      return { pitchHz: sampleRate / (lag + delta), rms };
+    }
+  }
+  return null;
+};
+
+/* ------------------------------------------------------------------ */
+/* Gerenciador                                                         */
+/* ------------------------------------------------------------------ */
 
 export class GerenciadorDeAudio {
   constructor() {
@@ -13,207 +84,241 @@ export class GerenciadorDeAudio {
     this.nextPlayTime = 0;
     this.isTalking = false;
     this.silenceTimer = null;
-    this.rafId = null;
+    this.vadTimer = null;
+    this.encerrado = false; // vira true em parar(): impede que uma inicialização em andamento reabra o microfone
 
     this.activeSources = [];
     this.framesDeRuido = 0;
 
-    // =====================================================================
-    // ESTADO DE BIOMETRIA VOCAL (Identificação Yuri vs. Terceiros)
-    // =====================================================================
+    // Biometria vocal (Yuri vs. terceiros)
     this.voiceProfile = this.carregarPerfilVocal();
-    this.amostrasFalaAtual = []; // Guarda { pitch, centroid, energy } durante a frase
+    this.amostrasFalaAtual = []; // { pitchHz, centroidHz, energy } por quadro vozeado
     this.forcarCalibracaoNaProximaFala = false;
+    this.ultimoResultado = null; // { locutor, confianca, pitchHz, t } da última avaliação conclusiva
   }
+
+  /* --------------------------- Perfil vocal --------------------------- */
 
   carregarPerfilVocal() {
     try {
       const saved = localStorage.getItem(VOICE_PROFILE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
+      if (!saved) return null;
+      const p = JSON.parse(saved);
+      const valido =
+        p && p.version === PROFILE_VERSION &&
+        Number.isFinite(p.pitchHz) && p.pitchHz >= 70 && p.pitchHz <= 400 &&
+        Number.isFinite(p.centroidHz) && Number.isFinite(p.energy);
+      return valido ? p : null;
+    } catch {
       return null;
     }
   }
 
   salvarPerfilVocal(perfil) {
+    this.voiceProfile = { ...perfil, version: PROFILE_VERSION };
     try {
-      this.voiceProfile = perfil;
-      localStorage.setItem(VOICE_PROFILE_KEY, JSON.stringify(perfil));
-    } catch (e) {}
+      localStorage.setItem(VOICE_PROFILE_KEY, JSON.stringify(this.voiceProfile));
+    } catch { /* storage indisponível: o perfil vale só nesta sessão */ }
   }
 
   resetarPerfilVocal() {
     this.voiceProfile = null;
+    this.ultimoResultado = null;
     this.forcarCalibracaoNaProximaFala = true;
-    localStorage.removeItem(VOICE_PROFILE_KEY);
+    try {
+      localStorage.removeItem(VOICE_PROFILE_KEY);
+    } catch { /* ignora */ }
   }
 
-  // Extrai Frequência Fundamental (Pitch Hz) e Centroide Espectral (Timbre Hz) do frame atual
-  extrairAssinaturaVocal(dataArray) {
+  // Assinatura de um quadro: pitch (autocorrelação), timbre (centroide espectral) e energia (RMS)
+  extrairAssinaturaVocal(freqData, timeData) {
     if (!this.audioContext || !this.analyser) return null;
-    const sampleRate = this.audioContext.sampleRate; // 16000 Hz
-    const binSize = sampleRate / this.analyser.fftSize; // ~15.625 Hz por bin
 
-    // Faixa fundamental da voz humana: ~80 Hz (bin 5) até ~320 Hz (bin 20)
-    const minVocalBin = Math.max(1, Math.floor(80 / binSize));
-    const maxVocalBin = Math.floor(320 / binSize);
+    const sampleRate = this.audioContext.sampleRate;
+    const pitch = estimarPitch(timeData, sampleRate);
+    if (!pitch) return null; // só quadros realmente vozeados entram no perfil
 
-    let maxVal = 0;
-    let peakBin = minVocalBin;
-    for (let i = minVocalBin; i <= maxVocalBin; i++) {
-      if (dataArray[i] > maxVal) {
-        maxVal = dataArray[i];
-        peakBin = i;
-      }
+    const binSize = sampleRate / this.analyser.fftSize;
+    const minBin = Math.max(1, Math.floor(80 / binSize));
+    const maxBin = Math.min(freqData.length - 1, Math.floor(2600 / binSize));
+
+    let somaPonderada = 0;
+    let energiaTotal = 0;
+    for (let i = minBin; i <= maxBin; i++) {
+      somaPonderada += i * binSize * freqData[i];
+      energiaTotal += freqData[i];
     }
+    const centroidHz = energiaTotal > 0 ? somaPonderada / energiaTotal : 0;
 
-    // Só considera frame com energia vocal real (ignora ruído de ventilador/teclado)
-    if (maxVal < 75) return null;
-
-    // Interpolação parabólica simples para refinar o pico de Pitch em Hz
-    const prev = dataArray[peakBin - 1] || maxVal;
-    const next = dataArray[peakBin + 1] || maxVal;
-    const denom = prev - 2 * maxVal + next;
-    const delta = denom !== 0 ? (0.5 * (prev - next)) / denom : 0;
-    const pitchHz = (peakBin + delta) * binSize;
-
-    // Centroide Espectral (Timbre vocal de 80 Hz a 2600 Hz)
-    const maxTimbreBin = Math.min(dataArray.length - 1, Math.floor(2600 / binSize));
-    let weightedSum = 0;
-    let totalEnergy = 0;
-    for (let i = minVocalBin; i <= maxTimbreBin; i++) {
-      weightedSum += i * binSize * dataArray[i];
-      totalEnergy += dataArray[i];
-    }
-    const centroidHz = totalEnergy > 0 ? weightedSum / totalEnergy : 0;
-
-    return { pitchHz, centroidHz, energy: maxVal };
+    return { pitchHz: pitch.pitchHz, centroidHz, energy: pitch.rms * 1000 };
   }
 
-  // Consolida todas as amostras colhidas durante a frase e compara com o perfil do Yuri
+  // Resultado "sem opinião formada": mantém o último locutor por alguns segundos
+  resultadoInconclusivo() {
+    const agora = Date.now();
+    const ultimo = this.ultimoResultado;
+    if (ultimo && agora - ultimo.t < CONTINUIDADE_MS) {
+      return {
+        locutor: ultimo.locutor,
+        confianca: ultimo.confianca,
+        pitchHz: ultimo.pitchHz,
+        perfilPitchHz: this.voiceProfile?.pitchHz,
+        inconclusivo: true
+      };
+    }
+    return { locutor: 'Yuri', confianca: 0, inconclusivo: true, calibrado: Boolean(this.voiceProfile) };
+  }
+
+  registrarResultado(resultado) {
+    this.ultimoResultado = {
+      locutor: resultado.locutor,
+      confianca: resultado.confianca,
+      pitchHz: resultado.pitchHz,
+      t: Date.now()
+    };
+    return resultado;
+  }
+
+  // Consolida as amostras da frase e compara com o perfil do Yuri.
+  // ATENÇÃO: pitch + timbre dão uma boa pista, não uma prova de identidade. Vozes parecidas passam,
+  // e uma gravação da voz dele também. Trate como conveniência, não como autenticação.
   avaliarLocutorDaFrase() {
     const amostras = this.amostrasFalaAtual;
     this.amostrasFalaAtual = [];
 
-    // Se a fala foi muito curta (< 5 frames vocais limpos), assume Yuri por segurança
-    if (amostras.length < 5) {
-      return { locutor: 'Yuri', confianca: 100, calibrado: Boolean(this.voiceProfile) };
+    const precisaCalibrar = !this.voiceProfile || this.forcarCalibracaoNaProximaFala;
+    if (amostras.length < (precisaCalibrar ? MIN_FRAMES_CALIBRACAO : MIN_FRAMES_AVALIACAO)) {
+      return this.resultadoInconclusivo();
     }
 
-    const avgPitch = amostras.reduce((acc, a) => acc + a.pitchHz, 0) / amostras.length;
+    const avgPitch = mediana(amostras.map((a) => a.pitchHz)); // mediana: robusta a quadros fora do padrão
     const avgCentroid = amostras.reduce((acc, a) => acc + a.centroidHz, 0) / amostras.length;
     const avgEnergy = amostras.reduce((acc, a) => acc + a.energy, 0) / amostras.length;
 
-    // 1. Se ainda não existe perfil do Yuri (ou se pediu recalibração), registra esta fala como âncora!
-    if (!this.voiceProfile || this.forcarCalibracaoNaProximaFala) {
-      const novoPerfil = {
+    // Sem perfil (ou recalibração pedida): esta fala vira a âncora
+    if (precisaCalibrar) {
+      this.salvarPerfilVocal({
         pitchHz: Math.round(avgPitch),
         centroidHz: Math.round(avgCentroid),
         energy: Math.round(avgEnergy),
         samplesCount: 1,
         updatedAt: new Date().toISOString()
-      };
-      this.salvarPerfilVocal(novoPerfil);
+      });
       this.forcarCalibracaoNaProximaFala = false;
-      return {
+      return this.registrarResultado({
         locutor: 'Yuri',
         confianca: 100,
         recemCalibrado: true,
         pitchHz: Math.round(avgPitch)
-      };
+      });
     }
 
-    // 2. Calcula a distância acústica em relação à assinatura vocal do Yuri
-    const pitchDiff = Math.abs(avgPitch - this.voiceProfile.pitchHz);
-    const centroidDiff = Math.abs(avgCentroid - this.voiceProfile.centroidHz);
-    const energyRatio = avgEnergy / (this.voiceProfile.energy || avgEnergy);
+    const perfil = this.voiceProfile;
+    const pitchDiff = Math.abs(avgPitch - perfil.pitchHz);
+    const centroidDiff = Math.abs(avgCentroid - perfil.centroidHz);
+    const energyRatio = avgEnergy / (perfil.energy || avgEnergy);
 
-    // Penalidades:
-    // - Diferença de Pitch > 32 Hz ou Timbre > 280 Hz ou volume muito distante (< 55% da energia normal)
-    const normPitchError = pitchDiff / 45; // > 1.0 indica tom vocal bem diferente
+    const normPitchError = pitchDiff / 45; // > 1.0: tom bem diferente
     const normCentroidError = centroidDiff / 320;
-    const distancePenalty = energyRatio < 0.55 ? 0.35 : 0; // Pessoa falando longe do microfone
+    const distancePenalty = energyRatio < 0.55 ? 0.35 : 0; // falando longe do microfone
 
     const distanciaTotal = normPitchError * 0.55 + normCentroidError * 0.35 + distancePenalty;
     const similaridade = Math.max(0, Math.min(100, Math.round((1 - distanciaTotal * 0.45) * 100)));
+    const isYuri = similaridade >= LIMITE_SIMILARIDADE;
 
-    const isYuri = similaridade >= 68;
-
-    // Aprendizado contínuo suave (Média Móvel Exponencial) quando a certeza de ser o Yuri é alta
-    if (isYuri && similaridade >= 82) {
+    // Aprendizado contínuo suave (média móvel) só quando há bastante certeza
+    if (isYuri && similaridade >= LIMITE_APRENDIZADO) {
       this.salvarPerfilVocal({
-        pitchHz: Math.round(this.voiceProfile.pitchHz * 0.85 + avgPitch * 0.15),
-        centroidHz: Math.round(this.voiceProfile.centroidHz * 0.85 + avgCentroid * 0.15),
-        energy: Math.round(this.voiceProfile.energy * 0.85 + avgEnergy * 0.15),
-        samplesCount: (this.voiceProfile.samplesCount || 1) + 1,
+        pitchHz: Math.round(perfil.pitchHz * 0.85 + avgPitch * 0.15),
+        centroidHz: Math.round(perfil.centroidHz * 0.85 + avgCentroid * 0.15),
+        energy: Math.round(perfil.energy * 0.85 + avgEnergy * 0.15),
+        samplesCount: (perfil.samplesCount || 1) + 1,
         updatedAt: new Date().toISOString()
       });
     }
 
-    return {
+    return this.registrarResultado({
       locutor: isYuri ? 'Yuri' : 'Visitante',
       confianca: similaridade,
       pitchHz: Math.round(avgPitch),
-      perfilPitchHz: this.voiceProfile.pitchHz,
+      perfilPitchHz: perfil.pitchHz,
       longeDoMic: energyRatio < 0.55
-    };
+    });
   }
 
+  /* ----------------------------- Captura ------------------------------ */
+
   async inicializar(onPcmData, onSilenceDetected, onStartTalking) {
-    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    this.encerrado = false;
 
-    if (this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
-    }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    this.audioContext = ctx;
+    if (ctx.state === 'suspended') await ctx.resume();
 
+    // Junta 512 amostras por pacote antes de enviar
     const codigoDoProcessador = `
       class PcmProcessor extends AudioWorkletProcessor {
-        process(inputs, outputs, parameters) {
-          const input = inputs[0];
-          if (input.length > 0) {
-            const canal = input[0];
-            const pcm16 = new Int16Array(canal.length);
+        constructor() {
+          super();
+          this.buffer = new Int16Array(${CHUNK_SAMPLES});
+          this.offset = 0;
+        }
+        process(inputs) {
+          const canal = inputs[0] && inputs[0][0];
+          if (canal) {
             for (let i = 0; i < canal.length; i++) {
-              let s = Math.max(-1, Math.min(1, canal[i]));
-              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              const s = Math.max(-1, Math.min(1, canal[i]));
+              this.buffer[this.offset++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              if (this.offset === this.buffer.length) {
+                this.port.postMessage(this.buffer.buffer.slice(0));
+                this.offset = 0;
+              }
             }
-            this.port.postMessage(pcm16.buffer);
           }
-          return true; 
+          return true;
         }
       }
       registerProcessor('pcm-processor', PcmProcessor);
     `;
 
-    const blob = new Blob([codigoDoProcessador], { type: 'application/javascript' });
-    const workletUrl = URL.createObjectURL(blob);
-    await this.audioContext.audioWorklet.addModule(workletUrl);
+    const workletUrl = URL.createObjectURL(new Blob([codigoDoProcessador], { type: 'application/javascript' }));
+    try {
+      await ctx.audioWorklet.addModule(workletUrl);
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
+    if (this.encerrado) return;
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, autoGainControl: true, noiseSuppression: true }
     });
+    // Se parar() rodou enquanto o navegador pedia permissão do microfone, fecha o stream recém-aberto
+    if (this.encerrado) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    this.stream = stream;
 
-    this.source = this.audioContext.createMediaStreamSource(this.stream);
-    this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+    this.source = ctx.createMediaStreamSource(stream);
+    this.workletNode = new AudioWorkletNode(ctx, 'pcm-processor');
 
-    // =====================================================================
-    // DETECTOR DE VOZ (VAD) + COLETOR BIOMÉTRICO (FFT 1024)
-    // =====================================================================
-    this.analyser = this.audioContext.createAnalyser();
+    // VAD + coleta biométrica (FFT de 1024 pontos = 64 ms de sinal)
+    this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.minDecibels = -55;
     this.analyser.smoothingTimeConstant = 0.25;
     this.source.connect(this.analyser);
 
-    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    const freqData = new Uint8Array(this.analyser.frequencyBinCount);
+    const timeData = new Float32Array(this.analyser.fftSize);
 
     const monitorarVolume = () => {
       if (!this.analyser) return;
 
-      this.analyser.getByteFrequencyData(dataArray);
+      this.analyser.getByteFrequencyData(freqData);
       let soma = 0;
-      for (let i = 0; i < dataArray.length; i++) soma += dataArray[i];
-      const volumeMedio = soma / dataArray.length;
+      for (let i = 0; i < freqData.length; i++) soma += freqData[i];
+      const volumeMedio = soma / freqData.length;
 
       const isPlaying = this.isPlaying();
       const limiteDinamico = isPlaying ? 45 : 14;
@@ -234,12 +339,11 @@ export class GerenciadorDeAudio {
             if (onStartTalking) onStartTalking();
           }
 
-          // Coleta amostra biométrica da voz apenas quando a IA está calada (para não medir a voz do próprio Bastian)
+          // Só mede a voz quando a IA está calada (para não medir a voz do próprio Bastian)
           if (!isPlaying) {
-            const assinatura = this.extrairAssinaturaVocal(dataArray);
-            if (assinatura) {
-              this.amostrasFalaAtual.push(assinatura);
-            }
+            this.analyser.getFloatTimeDomainData(timeData);
+            const assinatura = this.extrairAssinaturaVocal(freqData, timeData);
+            if (assinatura) this.amostrasFalaAtual.push(assinatura);
           }
         }
       } else {
@@ -247,40 +351,50 @@ export class GerenciadorDeAudio {
 
         if (this.isTalking && !this.silenceTimer) {
           this.silenceTimer = setTimeout(() => {
+            this.silenceTimer = null;
             this.isTalking = false;
             const analiseLocutor = this.avaliarLocutorDaFrase();
             if (onSilenceDetected) onSilenceDetected(analiseLocutor);
-          }, 800);
+          }, SILENCE_MS);
         }
       }
-
-      this.rafId = requestAnimationFrame(monitorarVolume);
     };
-    monitorarVolume();
 
-    this.workletNode.port.onmessage = (event) => {
-      const pcmBuffer = event.data;
-      const base64Audio = this.arrayBufferToBase64(pcmBuffer);
-      onPcmData(base64Audio);
-    };
+    // setInterval em vez de requestAnimationFrame: o rAF para quando a aba fica em segundo plano,
+    // e com ele o detector de silêncio (o Bastian deixava de responder com a aba escondida)
+    this.vadTimer = setInterval(monitorarVolume, VAD_INTERVAL_MS);
+
+    this.workletNode.port.onmessage = (event) => onPcmData(this.arrayBufferToBase64(event.data));
 
     this.source.connect(this.workletNode);
+    // Saída muda até o destino: alguns navegadores só processam o worklet se ele chegar ao destino
+    const mudo = ctx.createGain();
+    mudo.gain.value = 0;
+    this.workletNode.connect(mudo);
+    mudo.connect(ctx.destination);
   }
 
   arrayBufferToBase64(buffer) {
-    let binary = '';
     const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+    let binary = '';
+    const TAMANHO = 0x8000; // em blocos: evita concatenar byte a byte
+    for (let i = 0; i < bytes.length; i += TAMANHO) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + TAMANHO));
+    }
     return window.btoa(binary);
   }
 
+  /* ---------------------------- Reprodução ---------------------------- */
+
   tocarAudio(base64Audio) {
-    if (!this.audioContext) return;
+    if (!this.audioContext || this.encerrado) return;
 
     const stringBinaria = window.atob(base64Audio);
-    const bytes = new Uint8Array(stringBinaria.length);
-    for (let i = 0; i < stringBinaria.length; i++) bytes[i] = stringBinaria.charCodeAt(i);
+    const bytesUteis = stringBinaria.length - (stringBinaria.length % 2); // Int16Array exige tamanho par
+    if (bytesUteis === 0) return;
+
+    const bytes = new Uint8Array(bytesUteis);
+    for (let i = 0; i < bytesUteis; i++) bytes[i] = stringBinaria.charCodeAt(i);
 
     const int16Array = new Int16Array(bytes.buffer);
     const float32Array = new Float32Array(int16Array.length);
@@ -294,10 +408,7 @@ export class GerenciadorDeAudio {
     reprodutor.connect(this.audioContext.destination);
 
     const tempoAtual = this.audioContext.currentTime;
-
-    if (tempoAtual >= this.nextPlayTime) {
-      this.nextPlayTime = tempoAtual + 0.1;
-    }
+    if (tempoAtual >= this.nextPlayTime) this.nextPlayTime = tempoAtual + 0.1;
 
     reprodutor.start(this.nextPlayTime);
     this.nextPlayTime += audioBuffer.duration;
@@ -309,7 +420,7 @@ export class GerenciadorDeAudio {
   }
 
   isPlaying() {
-    return this.audioContext && this.audioContext.currentTime < this.nextPlayTime;
+    return Boolean(this.audioContext && this.audioContext.currentTime < this.nextPlayTime);
   }
 
   pararAudioAtual() {
@@ -318,24 +429,49 @@ export class GerenciadorDeAudio {
     this.activeSources.forEach((source) => {
       try {
         source.stop();
-      } catch (e) {}
+      } catch { /* já tinha terminado */ }
     });
     this.activeSources = [];
     this.nextPlayTime = this.audioContext.currentTime;
   }
 
-  parar() {
-    this.pararAudioAtual();
-    if (this.rafId) cancelAnimationFrame(this.rafId);
-    if (this.stream) this.stream.getTracks().forEach((track) => track.stop());
-    if (this.workletNode) this.workletNode.disconnect();
-    if (this.analyser) this.analyser.disconnect();
-    if (this.audioContext) this.audioContext.close();
+  /* ----------------------------- Encerrar ----------------------------- */
 
+  // Pode ser chamado mais de uma vez: o segundo close() de um AudioContext rejeitava a promise sem tratamento
+  parar() {
+    this.encerrado = true;
+    this.pararAudioAtual();
+
+    clearInterval(this.vadTimer);
+    clearTimeout(this.silenceTimer);
+    this.vadTimer = null;
+    this.silenceTimer = null;
+
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
+
+    try {
+      if (this.workletNode) {
+        this.workletNode.port.onmessage = null;
+        this.workletNode.disconnect();
+      }
+      if (this.analyser) this.analyser.disconnect();
+      if (this.source) this.source.disconnect();
+    } catch { /* nós já desconectados */ }
+
+    const ctx = this.audioContext;
+    this.audioContext = null; // tocarAudio e isPlaying deixam de usar um contexto fechado
+    if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {});
+
+    this.workletNode = null;
     this.analyser = null;
+    this.source = null;
+    this.activeSources = [];
     this.nextPlayTime = 0;
     this.framesDeRuido = 0;
+    this.isTalking = false;
     this.amostrasFalaAtual = [];
-    if (this.silenceTimer) clearTimeout(this.silenceTimer);
   }
 }

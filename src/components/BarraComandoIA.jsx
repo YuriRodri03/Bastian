@@ -6,826 +6,1010 @@ import { GeminiLiveConnection } from '../services/liveAiService';
 import { GerenciadorDeAudio } from '../services/audioManager';
 
 import { useFinanceStore } from '../store/useFinanceStore';
-import { useAgendaStore } from '../store/useAgendaStore'; 
+import { useAgendaStore } from '../store/useAgendaStore';
 import { useInboxStore } from '../store/useInboxStore';
 import { useKanbanStore } from '../store/useKanbanStore';
 import { useFitnessStore } from '../store/useFitnessStore';
-import { useChatStore } from '../store/useChatStore'; 
+import { useChatStore } from '../store/useChatStore';
+
+import {
+  CATEGORIAS_RECEITA,
+  CATEGORIAS_DESPESA,
+  CATEGORIA_APORTE,
+  CATEGORIA_RENDIMENTO,
+  CATEGORIA_RESGATE,
+  normalizeDateISO,
+  parseFaturaDescription,
+  serializeFaturaDescription
+} from '../utils/financeUtils';
+
+/* ================================================================== */
+/* Constantes e helpers                                                */
+/* ================================================================== */
+
+const PROCESSING_TIMEOUT_MS = 25000; // se a IA não responder, volta a ouvir
+const RESERVA_MINIMA = 300; // colchão mantido na sugestão de reserva
+const MUTACOES = new Set(['registrar_dado', 'alterar_dado', 'gerenciar_ficha_treino']);
 
 const getLocalTodayISO = () => {
   const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
-// =========================================================================
-// MOTOR DE PESQUISA NA INTERNET EM TEMPO REAL (Zero Cota Gemini / Zero Erro 429)
-// =========================================================================
-const buscarNaWebComGemini = async (consulta) => {
+// Sem acento, minúsculo: "Finanças" == "financas"
+const norm = (s) =>
+  String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+// Aceita 20, "20.5", "R$ 1.234,56"; devolve 0 se não der para entender
+const parseValor = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (v === null || v === undefined) return 0;
+  const s = String(v).replace(/[^\d,.-]/g, '');
+  const n = parseFloat(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// A IA pode mandar "amanhã" ou "31/12": só deixa passar o que vira AAAA-MM-DD
+const normalizarData = (valor, fallback) => {
+  if (!valor) return fallback;
+  const iso = normalizeDateISO(String(valor));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || Number.isNaN(new Date(`${iso}T00:00:00`).getTime())) {
+    throw new Error(`Data inválida "${valor}". Use o formato AAAA-MM-DD.`);
+  }
+  return iso;
+};
+
+// Remove marcações de markdown sem destruir hífens e underscores do texto ("guarda-roupa")
+const limparMarkdown = (texto) => {
+  if (!texto) return '';
+  return texto
+    .replace(/\*\*|__|~~|`/g, '')
+    .replace(/^\s*[#>]+\s*/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\*/g, '')
+    .trim();
+};
+
+const textoFinanca = (t) => parseFaturaDescription(t.description, t.category).mainTitle;
+const textoTitulo = (i) => i.title || '';
+
+// Encontra UM registro por id ou nome. Nunca "chuta": se não achar ou houver ambiguidade,
+// lança erro para a IA perguntar ao usuário (antes, apagava/alterava o primeiro que contivesse o texto).
+const resolverRegistro = (lista, idOuTexto, getTexto, rotulo = 'registro') => {
+  if (idOuTexto === undefined || idOuTexto === null || norm(idOuTexto) === '') {
+    throw new Error(`Informe qual ${rotulo}.`);
+  }
+  const porId = lista.find((i) => String(i.id) === String(idOuTexto));
+  if (porId) return porId;
+
+  const alvo = norm(idOuTexto);
+  const exatos = lista.filter((i) => norm(getTexto(i)) === alvo);
+  if (exatos.length === 1) return exatos[0];
+
+  const candidatos = exatos.length > 1 ? exatos : lista.filter((i) => norm(getTexto(i)).includes(alvo));
+  if (candidatos.length === 1) return candidatos[0];
+  if (candidatos.length === 0) throw new Error(`Nenhum ${rotulo} encontrado para "${idOuTexto}".`);
+
+  const opcoes = candidatos.slice(0, 5).map((i) => `${getTexto(i)} (id ${i.id})`).join('; ');
+  throw new Error(`Encontrei ${candidatos.length} ${rotulo}s parecidos: ${opcoes}. Peça ao Yuri para especificar e use o id.`);
+};
+
+// Garante categoria válida e o tipo certo (aporte é despesa; rendimento e resgate são receita)
+const TIPO_FIXO = {
+  [CATEGORIA_APORTE]: 'despesa',
+  [CATEGORIA_RENDIMENTO]: 'receita',
+  [CATEGORIA_RESGATE]: 'receita'
+};
+const resolverCategoriaFinanceira = (categoria, tipo) => {
+  const lista = tipo === 'receita' ? CATEGORIAS_RECEITA : CATEGORIAS_DESPESA;
+  const alvo = norm(categoria);
+  const achada = [...CATEGORIAS_RECEITA, ...CATEGORIAS_DESPESA].find((c) => norm(c) === alvo);
+  if (achada && TIPO_FIXO[achada]) return { category: achada, type: TIPO_FIXO[achada] };
+  if (achada && lista.includes(achada)) return { category: achada, type: tipo };
+  return { category: 'Outros', type: tipo };
+};
+
+// Ações irreversíveis em massa exigem repetir o comando em até 60s (a IA pergunta ao usuário entre as duas)
+const confirmacoesPendentes = new Map();
+const confirmarAcaoDestrutiva = (chave) => {
+  const agora = Date.now();
+  const expira = confirmacoesPendentes.get(chave);
+  if (expira && expira > agora) {
+    confirmacoesPendentes.delete(chave);
+    return true;
+  }
+  confirmacoesPendentes.set(chave, agora + 60000);
+  return false;
+};
+
+const vazio = (v) => !v || v.length === 0;
+
+/* ================================================================== */
+/* Pesquisa na internet (APIs públicas, em paralelo e com timeout)     */
+/* ================================================================== */
+
+const fetchJson = async (url, ms = 6000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const buscarCambio = async () => {
+  const d = await fetchJson('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL');
+  if (!d) return null;
+  const usd = Number(d.USDBRL?.bid || 0).toFixed(2);
+  const variacao = d.USDBRL?.pctChange !== undefined ? ` (variação de ${d.USDBRL.pctChange}% hoje)` : '';
+  const eur = Number(d.EURBRL?.bid || 0).toFixed(2);
+  const btc = Number(d.BTCBRL?.bid || 0).toLocaleString('pt-BR');
+  return {
+    texto: `Cotações comerciais agora: Dólar (USD) a R$ ${usd}${variacao}, Euro (EUR) a R$ ${eur} e Bitcoin (BTC) a R$ ${btc}.`,
+    fonte: 'AwesomeAPI Câmbio'
+  };
+};
+
+const buscarSelic = async () => {
+  const s = await fetchJson('https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json');
+  if (!s?.[0]?.valor) return null;
+  return {
+    texto: `Taxa Selic Meta atual (Banco Central): ${s[0].valor}% ao ano (data base: ${s[0].data}).`,
+    fonte: 'Banco Central do Brasil'
+  };
+};
+
+const buscarClima = async () => {
+  const c = await fetchJson(
+    'https://api.open-meteo.com/v1/forecast?latitude=-3.7172&longitude=-38.5433&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FFortaleza&forecast_days=1'
+  );
+  if (!c) return null;
+  const probChuva = c.daily?.precipitation_probability_max?.[0] ?? 0;
+  return {
+    texto: `Clima agora em Fortaleza: ${c.current?.temperature_2m}°C (sensação térmica de ${c.current?.apparent_temperature}°C, umidade em ${c.current?.relative_humidity_2m}%). Para hoje: máxima de ${c.daily?.temperature_2m_max?.[0]}°C, mínima de ${c.daily?.temperature_2m_min?.[0]}°C e probabilidade de chuva de ${probChuva}%.`,
+    fonte: 'Open-Meteo Fortaleza'
+  };
+};
+
+const buscarNoticias = async (termo) => {
+  const queryLimpa = termo
+    .replace(/(quais as|me dê|me da|not[ií]cias sobre|not[ií]cias de|hoje|agora|pesquise)/gi, '')
+    .trim();
+  const rssUrl =
+    queryLimpa.length > 2
+      ? `https://news.google.com/rss/search?q=${encodeURIComponent(queryLimpa)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`
+      : 'https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419';
+
+  const data = await fetchJson(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`);
+  const manchetes = (data?.items || []).slice(0, 4).map((item, i) => `${i + 1}. ${item.title}`).join(' | ');
+  return manchetes ? { texto: `Principais manchetes recentes no Google Notícias: ${manchetes}`, fonte: 'Google News BR' } : null;
+};
+
+const buscarWikipedia = async (consulta) => {
+  const data = await fetchJson(
+    `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(consulta)}&utf8=&format=json&origin=*`
+  );
+  const snippets = (data?.query?.search || [])
+    .slice(0, 2)
+    .map((item) => {
+      const limpo = item.snippet
+        .replace(/<[^>]*>?/gm, '')
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&#0?39;/g, "'");
+      return `${item.title}: ${limpo}`;
+    })
+    .join(' | ');
+  return snippets ? { texto: `Dados de referência: ${snippets}`, fonte: 'Wikipedia PT' } : null;
+};
+
+const buscarNaWeb = async (consulta) => {
   if (!consulta) return { status: 'erro', mensagem: 'Consulta vazia.' };
 
   const termo = consulta.toLowerCase().trim();
   const dataHoje = new Date().toLocaleDateString('pt-BR', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
-  const resultados = [];
-  const fontes = [];
+  const querCambio = /(d[oó]lar|euro|bitcoin|btc|moeda|cota[cç][aã]o|c[aâ]mbio|libra)/i.test(termo);
+  const querSelic = /(selic|juros|ipca|infla[cç][aã]o|cdi|copom|taxa)/i.test(termo);
+  const querClima = /(clima|tempo|chuva|chover|temperatura|graus|calor|previs[aã]o)/i.test(termo);
+  const especifica = querCambio || querSelic || querClima;
+  const querNoticias =
+    /(not[ií]cia|manchete|jornal|acontecendo|novidade|atualidade|mundo|pol[ií]tica|economia|esporte|jogo)/i.test(termo) || !especifica;
 
-  try {
-    // 1. COTAÇÕES FINANCEIRAS EM TEMPO REAL (Dólar, Euro, Bitcoin)
-    if (/(d[oó]lar|euro|bitcoin|btc|moeda|cota[cç][aã]o|c[aâ]mbio|libra)/i.test(termo)) {
-      try {
-        const resMoedas = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL');
-        if (resMoedas.ok) {
-          const d = await resMoedas.json();
-          const usd = Number(d.USDBRL?.bid || 0).toFixed(2);
-          const usdVar = d.USDBRL?.pctChange;
-          const eur = Number(d.EURBRL?.bid || 0).toFixed(2);
-          const btc = Number(d.BTCBRL?.bid || 0).toLocaleString('pt-BR');
-          resultados.push(
-            `Cotações comerciais agora: Dólar (USD) a R$ ${usd} (variação de ${usdVar}% hoje), Euro (EUR) a R$ ${eur} e Bitcoin (BTC) a R$ ${btc}.`
-          );
-          fontes.push('AwesomeAPI Câmbio');
-        }
-      } catch {}
-    }
+  // Wikipedia só entra quando a pergunta não é cotação/juros/clima (antes poluía todas as respostas)
+  const tarefas = [];
+  if (querCambio) tarefas.push(buscarCambio());
+  if (querSelic) tarefas.push(buscarSelic());
+  if (querClima) tarefas.push(buscarClima());
+  if (querNoticias) tarefas.push(buscarNoticias(termo));
+  if (!especifica) tarefas.push(buscarWikipedia(consulta));
 
-    // 2. INDICADORES DO BANCO CENTRAL DO BRASIL (Selic / Juros / Copom)
-    if (/(selic|juros|ipca|infla[cç][aã]o|cdi|copom|taxa)/i.test(termo)) {
-      try {
-        const resSelic = await fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json');
-        if (resSelic.ok) {
-          const sData = await resSelic.json();
-          if (sData?.[0]?.valor) {
-            resultados.push(`Taxa Selic Meta atual (Banco Central): ${sData[0].valor}% ao ano (data base: ${sData[0].data}).`);
-            fontes.push('Banco Central do Brasil');
-          }
-        }
-      } catch {}
-    }
+  const encontrados = (await Promise.all(tarefas)).filter(Boolean);
 
-    // 3. CLIMA E PREVISÃO DO TEMPO (Fortaleza-CE)
-    if (/(clima|tempo|chuva|chover|temperatura|graus|calor|previs[aã]o)/i.test(termo)) {
-      try {
-        const resClima = await fetch(
-          'https://api.open-meteo.com/v1/forecast?latitude=-3.7172&longitude=-38.5433&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FFortaleza&forecast_days=1'
-        );
-        if (resClima.ok) {
-          const c = await resClima.json();
-          const tempAtual = c.current?.temperature_2m;
-          const sensacao = c.current?.apparent_temperature;
-          const umidade = c.current?.relative_humidity_2m;
-          const probChuva = c.daily?.precipitation_probability_max?.[0] ?? 0;
-          const max = c.daily?.temperature_2m_max?.[0];
-          const min = c.daily?.temperature_2m_min?.[0];
-
-          resultados.push(
-            `Clima agora em Fortaleza: ${tempAtual}°C (sensação térmica de ${sensacao}°C, umidade em ${umidade}%). Para hoje: máxima de ${max}°C, mínima de ${min}°C e probabilidade de chuva de ${probChuva}%.`
-          );
-          fontes.push('Open-Meteo Fortaleza');
-        }
-      } catch {}
-    }
-
-    // 4. NOTÍCIAS DO DIA EM TEMPO REAL (Google News Brasil RSS -> JSON)
-    if (/(not[ií]cia|manchete|jornal|acontecendo|novidade|atualidade|mundo|pol[ií]tica|economia|esporte|jogo)/i.test(termo) || resultados.length === 0) {
-      try {
-        const queryLimpa = termo
-          .replace(/(quais as|me dê|me da|not[ií]cias sobre|not[ií]cias de|hoje|agora|pesquise)/gi, '')
-          .trim();
-
-        const rssUrl = queryLimpa.length > 2
-          ? `https://news.google.com/rss/search?q=${encodeURIComponent(queryLimpa)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`
-          : `https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419`;
-
-        const resNews = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`);
-        if (resNews.ok) {
-          const newsData = await resNews.json();
-          const manchetes = (newsData.items || [])
-            .slice(0, 4)
-            .map((item, i) => `${i + 1}. ${item.title}`)
-            .join(' | ');
-
-          if (manchetes) {
-            resultados.push(`Principais manchetes recentes no Google Notícias: ${manchetes}`);
-            fontes.push('Google News BR');
-          }
-        }
-      } catch {}
-    }
-
-    // 5. BUSCA ENCICLOPÉDICA E FATOS ESPECÍFICOS (Wikipedia PT API)
-    try {
-      const wikiUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(consulta)}&utf8=&format=json&origin=*`;
-      const wikiRes = await fetch(wikiUrl);
-      if (wikiRes.ok) {
-        const wikiData = await wikiRes.json();
-        const snippets = (wikiData?.query?.search || [])
-          .slice(0, 2)
-          .map((item) => `${item.title}: ${item.snippet.replace(/<[^>]*>?/gm, '')}`)
-          .join(' | ');
-
-        if (snippets) {
-          resultados.push(`Dados de referência: ${snippets}`);
-          fontes.push('Wikipedia PT');
-        }
-      }
-    } catch {}
-
-    if (resultados.length > 0) {
-      return {
-        status: 'sucesso',
-        data_consulta: dataHoje,
-        resultado_atualizado: resultados.join(' \n '),
-        fontes_consultadas: fontes
-      };
-    }
-
+  if (encontrados.length === 0) {
     return {
-      status: 'sucesso',
+      status: 'sem_resultados',
       data_consulta: dataHoje,
-      resultado_atualizado: 'A busca externa foi concluída, mas não retornou manchetes específicas para este termo exato.',
-      fontes_consultadas: ['Web Search']
+      mensagem: 'Nenhuma das fontes consultadas retornou dados para este termo. Diga ao Yuri que não conseguiu confirmar.',
+      fontes_consultadas: []
     };
-  } catch (err) {
-    return {
-      status: 'erro',
-      mensagem: 'Não foi possível concluir a pesquisa externa no momento.'
-    };
+  }
+  return {
+    status: 'sucesso',
+    data_consulta: dataHoje,
+    resultado_atualizado: encontrados.map((r) => r.texto).join(' \n '),
+    fontes_consultadas: encontrados.map((r) => r.fonte)
+  };
+};
+
+/* ================================================================== */
+/* Relatório executivo (mesmas regras de saldo/receita da tela)        */
+/* ================================================================== */
+
+const gerarRelatorioExecutivo = () => {
+  const dataHoje = getLocalTodayISO();
+  const mesAtualPrefix = dataHoje.substring(0, 7);
+  const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const { transactions, balance, investedBalance, error: erroFinanceiro } = useFinanceStore.getState();
+  const { agendaItems } = useAgendaStore.getState();
+  const { inboxTasks } = useInboxStore.getState();
+  const { tasks: kanbanTasks } = useKanbanStore.getState();
+  const { healthLogs, fichasTreino } = useFitnessStore.getState();
+
+  let receitasPagasMes = 0;
+  let rendimentosMes = 0;
+  let despesasOperacionaisPagasMes = 0;
+  let contasAPagarMes = 0;
+  let contasAReceberMes = 0;
+  let aportesMes = 0;
+  const gastosPorCategoria = {};
+
+  transactions.forEach((t) => {
+    const tDate = t.date ? normalizeDateISO(t.date) : '';
+    if (!tDate.startsWith(mesAtualPrefix)) return;
+
+    const val = Number(t.amount) || 0;
+    const isPago = (t.status || 'pago') === 'pago';
+
+    if (t.type === 'receita') {
+      if (isPago) {
+        if (t.category === CATEGORIA_RENDIMENTO) rendimentosMes += val; // vai direto à carteira, não é receita
+        else if (t.category !== CATEGORIA_RESGATE) receitasPagasMes += val;
+      } else if (t.category !== CATEGORIA_RENDIMENTO) {
+        contasAReceberMes += val; // rendimento pendente não passa pela conta
+      }
+    } else if (t.type === 'despesa') {
+      if (isPago) {
+        if (t.category === CATEGORIA_APORTE) {
+          aportesMes += val;
+        } else {
+          despesasOperacionaisPagasMes += val;
+          gastosPorCategoria[t.category] = (gastosPorCategoria[t.category] || 0) + val;
+        }
+      } else {
+        contasAPagarMes += val;
+      }
+    }
+  });
+
+  const balancoLiquidoMes = receitasPagasMes - despesasOperacionaisPagasMes;
+  const saldoProjetadoFimDoMes = balance + contasAReceberMes - contasAPagarMes;
+  const margemParaReserva = Math.max(0, saldoProjetadoFimDoMes - RESERVA_MINIMA);
+  const r2 = (n) => Number((Number(n) || 0).toFixed(2));
+
+  // Pendências mais próximas primeiro (antes saíam as de 60 meses à frente, por causa da ordem decrescente)
+  const pendentes = transactions
+    .filter((t) => (t.status || 'pago') === 'pendente')
+    .map((t) => ({ t, data: t.date ? normalizeDateISO(t.date) : '' }))
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  const contasPendentesLista = pendentes.slice(0, 12).map(({ t, data }) => ({
+    id: t.id,
+    descricao: textoFinanca(t),
+    valor: t.amount,
+    vencimento: t.date,
+    atrasada: !!data && data < dataHoje,
+    tipo: t.type
+  }));
+
+  const compromissosProximos = agendaItems
+    .filter((e) => !e.is_completed && (e.date || '') >= dataHoje)
+    .sort((a, b) => `${a.date}${a.time || ''}`.localeCompare(`${b.date}${b.time || ''}`))
+    .slice(0, 15)
+    .map((e) => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, categoria: e.category }));
+
+  const tarefasPendentes = inboxTasks
+    .filter((t) => !t.completed)
+    .slice(0, 15)
+    .map((t) => ({ id: t.id, titulo: t.title, data: t.date }));
+
+  const projetosKanban = kanbanTasks.slice(0, 12).map((k) => ({ id: k.id, titulo: k.title, coluna: k.status }));
+
+  // Assume healthLogs do mais recente para o mais antigo
+  const logs = healthLogs || [];
+  const ultimoPesoObj = logs.find((l) => l.type === 'peso');
+  const ultimasMedidas = {};
+  logs.filter((l) => l.type === 'medida').forEach((m) => {
+    if (!ultimasMedidas[m.title]) ultimasMedidas[m.title] = `${m.value}${m.unit || 'cm'}`;
+  });
+
+  return {
+    data_hoje: dataHoje,
+    hora_atual: horaAtual,
+    ...(erroFinanceiro && {
+      aviso_dados: 'Falha ao carregar os lançamentos financeiros: os valores abaixo podem estar incompletos. Não os trate como definitivos.'
+    }),
+    resumo_financeiro: {
+      saldo_atual_em_conta: r2(balance),
+      total_investido_na_carteira: r2(investedBalance),
+      receitas_pagas_no_mes: r2(receitasPagasMes),
+      rendimentos_diretos_na_carteira_no_mes: r2(rendimentosMes),
+      despesas_operacionais_pagas_no_mes: r2(despesasOperacionaisPagasMes),
+      aportes_investidos_no_mes: r2(aportesMes),
+      balanco_operacional_do_mes: r2(balancoLiquidoMes),
+      contas_pendentes_a_pagar_no_mes: r2(contasAPagarMes),
+      contas_a_receber_no_mes: r2(contasAReceberMes),
+      saldo_projetado_apos_pagar_pendencias: r2(saldoProjetadoFimDoMes),
+      sugestao_segura_para_guardar_na_reserva_agora: r2(margemParaReserva),
+      gastos_por_categoria_no_mes: gastosPorCategoria,
+      total_pendencias: pendentes.length,
+      contas_pendentes_detalhadas: contasPendentesLista
+    },
+    produtividade: {
+      compromissos_agenda: compromissosProximos,
+      tarefas_inbox_pendentes: tarefasPendentes,
+      quadro_kanban: projetosKanban
+    },
+    saude_fitness: {
+      fichas_de_treino_atuais: fichasTreino,
+      total_treinos_concluidos: logs.filter((l) => l.type === 'treino').length,
+      ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null,
+      medidas_corporais_atuais: ultimasMedidas,
+      ultimos_registros_sono: logs.filter((l) => l.type === 'sono').slice(0, 5),
+      ultimos_registros_humor: logs.filter((l) => l.type === 'humor').slice(0, 5)
+    }
+  };
+};
+
+const hidratarStoresSeNecessario = async () => {
+  const promises = [];
+  if (vazio(useFinanceStore.getState().transactions)) promises.push(useFinanceStore.getState().fetchTransactions());
+  if (vazio(useAgendaStore.getState().agendaItems)) promises.push(useAgendaStore.getState().fetchAgendaItems());
+  if (vazio(useInboxStore.getState().inboxTasks)) promises.push(useInboxStore.getState().fetchInboxTasks());
+  if (vazio(useKanbanStore.getState().tasks)) promises.push(useKanbanStore.getState().fetchKanbanTasks());
+  if (vazio(useFitnessStore.getState().healthLogs)) promises.push(useFitnessStore.getState().fetchHealthLogs?.());
+  if (promises.length > 0) await Promise.allSettled(promises);
+};
+
+/* ================================================================== */
+/* Ferramentas da IA: cada uma DEVOLVE um resultado (nunca fica sem    */
+/* resposta, senão a conversa ao vivo fica esperando)                  */
+/* ================================================================== */
+
+const GRUPOS = {
+  inbox: ['inbox', 'tarefa'],
+  agenda: ['agenda', 'evento', 'compromisso'],
+  financas: ['financas', 'financa', 'transacao', 'despesa', 'receita', 'gasto'],
+  kanban: ['kanban', 'projeto'],
+  ficha: ['ficha_treino', 'ficha', 'treino'],
+  saude: ['peso', 'medida', 'sono', 'humor', 'saude']
+};
+const grupoDe = (entidade) => Object.keys(GRUPOS).find((g) => GRUPOS[g].includes(norm(entidade)));
+
+const gerenciarFichaTreino = (args, { exibirMensagem }) => {
+  const fitness = useFitnessStore.getState();
+  const acao = norm(args.acao || 'criar');
+  const titulo = String(args.titulo || 'Nova Ficha de Treino').trim();
+  const exercicios = Array.isArray(args.exercicios) ? args.exercicios : [];
+
+  switch (acao) {
+    case 'criar': {
+      const ficha = fitness.addFichaTreino(titulo, exercicios);
+      exibirMensagem(`💪 Ficha criada: ${ficha.title} (${ficha.exercicios.length} exercícios)`);
+      return { status: 'sucesso', acao: 'ficha_criada_na_aba_treinos', ficha };
+    }
+    case 'substituir_todas': {
+      if (!confirmarAcaoDestrutiva('substituir_todas')) {
+        return {
+          status: 'confirmacao_necessaria',
+          mensagem: 'Isto apaga TODAS as fichas de treino atuais. Pergunte ao Yuri se confirma e, somente se ele confirmar, repita exatamente a mesma chamada.'
+        };
+      }
+      fitness.setFichasTreino([]);
+      const ficha = fitness.addFichaTreino(titulo, exercicios);
+      exibirMensagem(`🔥 Base de fichas recriada: ${ficha.title}`);
+      return { status: 'sucesso', acao: 'base_substituida_e_ficha_criada', ficha };
+    }
+    case 'atualizar': {
+      let ficha = fitness.updateFichaTreino(titulo, {
+        title: titulo,
+        exercicios: exercicios.length > 0 ? exercicios : undefined
+      });
+      if (!ficha) ficha = fitness.addFichaTreino(titulo, exercicios);
+      exibirMensagem(`💪 Ficha atualizada: ${ficha.title}`);
+      return { status: 'sucesso', ficha };
+    }
+    case 'deletar': {
+      fitness.deleteFichaTreino(titulo);
+      exibirMensagem(`🗑️ Ficha removida: ${titulo}`);
+      return { status: 'sucesso', ficha_deletada: titulo };
+    }
+    default:
+      throw new Error(`Ação de ficha desconhecida: "${args.acao}".`);
   }
 };
 
+const registrarDado = async (args, { exibirMensagem }) => {
+  const entidade = norm(args.entidade);
+  const dados = args.dados || args;
+  const dataHoje = getLocalTodayISO();
+
+  const tituloFinal =
+    String([dados.titulo, dados.title, dados.descricao, dados.description, dados.modalidade, dados.nome]
+      .find((v) => v && String(v).trim()) ?? 'Novo Registro').trim();
+  const valor = parseValor(dados.valor ?? dados.amount ?? dados.peso ?? dados.duracao);
+  const data = normalizarData(dados.data || dados.date, dataHoje);
+  const hora = dados.hora || dados.time || null;
+  const categoria = dados.categoria || dados.category || null;
+  const statusFinal = norm(dados.status);
+
+  // Lista de exercícios ou entidade de ficha: vira Ficha de Treino (e não tarefa do Inbox)
+  if (['ficha_treino', 'ficha'].includes(entidade) || (Array.isArray(dados.exercicios) && dados.exercicios.length > 0)) {
+    const ficha = useFitnessStore.getState().addFichaTreino(tituloFinal, dados.exercicios || []);
+    exibirMensagem(`💪 Ficha criada: ${ficha.title}`);
+    return { status: 'sucesso', entidade: 'ficha_treino', ficha_criada: ficha };
+  }
+
+  switch (entidade) {
+    case 'agenda':
+    case 'evento':
+    case 'compromisso': {
+      const registro = await useAgendaStore.getState().addAgendaItem({
+        title: tituloFinal, date: data, time: hora, category: categoria || 'evento'
+      });
+      exibirMensagem(`📅 Agenda: ${tituloFinal} (${data})`);
+      return { status: 'sucesso', entidade: 'agenda', registro_criado: registro };
+    }
+
+    case 'inbox':
+    case 'tarefa': {
+      const registro = await useInboxStore.getState().addInboxTask(tituloFinal, data);
+      exibirMensagem(`📥 Tarefa: ${tituloFinal}`);
+      return { status: 'sucesso', entidade: 'inbox', registro_criado: registro };
+    }
+
+    case 'kanban':
+    case 'projeto': {
+      const coluna = ['backlog', 'in-progress', 'done'].includes(statusFinal) ? statusFinal : 'backlog';
+      const registro = await useKanbanStore.getState().addTask(tituloFinal, coluna);
+      exibirMensagem(`📋 Kanban: ${tituloFinal}`);
+      return { status: 'sucesso', entidade: 'kanban', registro_criado: registro };
+    }
+
+    case 'despesa':
+    case 'gasto':
+    case 'receita':
+    case 'ganho': {
+      const tipoPedido = ['despesa', 'gasto'].includes(entidade) ? 'despesa' : 'receita';
+      // Antes, um valor não entendido virava lançamento de R$ 0,00
+      if (valor <= 0) throw new Error('Valor inválido: informe um valor maior que zero.');
+
+      const { category, type } = resolverCategoriaFinanceira(categoria, tipoPedido);
+      const registro = await useFinanceStore.getState().addTransaction({
+        amount: valor,
+        description: tituloFinal,
+        type,
+        category,
+        date: data,
+        status: statusFinal === 'pendente' ? 'pendente' : 'pago'
+      });
+      exibirMensagem(`${type === 'despesa' ? '💸 Despesa' : '📈 Receita'}: ${tituloFinal} (R$ ${valor.toFixed(2)})`);
+      return {
+        status: 'sucesso',
+        entidade: type,
+        categoria_usada: category,
+        registro_criado: registro,
+        novo_saldo: useFinanceStore.getState().balance
+      };
+    }
+
+    case 'peso': {
+      if (valor <= 0) throw new Error('Peso inválido.');
+      await useFitnessStore.getState().addHealthLog('peso', 'Peso', valor, 'kg');
+      exibirMensagem(`⚖️ Peso registrado: ${valor} kg`);
+      return { status: 'sucesso', valor_kg: valor };
+    }
+
+    case 'treino':
+    case 'treino_concluido': {
+      const duracao = valor > 0 ? valor : 50;
+      await useFitnessStore.getState().concluirFichaTreino(tituloFinal, duracao);
+      exibirMensagem(`🏋️ Treino concluído: ${tituloFinal} (${duracao} min)`);
+      return { status: 'sucesso', treino: tituloFinal };
+    }
+
+    case 'medida': {
+      if (valor <= 0) throw new Error('Medida inválida.');
+      await useFitnessStore.getState().addHealthLog('medida', tituloFinal, valor, 'cm');
+      exibirMensagem(`📏 Medida (${tituloFinal}): ${valor} cm`);
+      return { status: 'sucesso', medida: tituloFinal, valor_cm: valor };
+    }
+
+    case 'sono': {
+      const horas = valor > 0 ? valor : 7.5;
+      await useFitnessStore.getState().addHealthLog('sono', `Sono: ${tituloFinal}`, horas, 'h');
+      exibirMensagem(`🌙 Sono registrado: ${horas}h (${tituloFinal})`);
+      return { status: 'sucesso', horas_dormidas: horas };
+    }
+
+    case 'humor':
+    case 'mente': {
+      const nota = valor >= 1 && valor <= 5 ? valor : 4;
+      await useFitnessStore.getState().addHealthLog('humor', `Humor: ${tituloFinal}`, nota, '/5');
+      exibirMensagem(`🧠 Check-in Mental: ${nota}/5 (${tituloFinal})`);
+      return { status: 'sucesso', nota };
+    }
+
+    default: {
+      const registro = await useInboxStore.getState().addInboxTask(tituloFinal, data);
+      exibirMensagem(`📥 Inbox: ${tituloFinal}`);
+      return {
+        status: 'sucesso',
+        observacao: `Entidade "${args.entidade}" não reconhecida: salvo como tarefa no Inbox.`,
+        registro_criado: registro
+      };
+    }
+  }
+};
+
+const alterarDado = async (args, { exibirMensagem }) => {
+  const acaoBruta = norm(args.acao);
+  const acao = acaoBruta === 'excluir' ? 'deletar' : acaoBruta;
+  const grupo = grupoDe(args.entidade);
+  const rawId = args.id;
+  const novos = args.dados || {};
+
+  if (!grupo) throw new Error(`Entidade desconhecida: "${args.entidade}".`);
+
+  const stores = {
+    inbox: () => ({ lista: useInboxStore.getState().inboxTasks, texto: textoTitulo, rotulo: 'tarefa' }),
+    agenda: () => ({ lista: useAgendaStore.getState().agendaItems, texto: textoTitulo, rotulo: 'compromisso' }),
+    financas: () => ({ lista: useFinanceStore.getState().transactions, texto: textoFinanca, rotulo: 'lançamento' }),
+    kanban: () => ({ lista: useKanbanStore.getState().tasks, texto: textoTitulo, rotulo: 'cartão' }),
+    saude: () => ({ lista: useFitnessStore.getState().healthLogs || [], texto: textoTitulo, rotulo: 'registro de saúde' })
+  };
+  const achar = () => {
+    const { lista, texto, rotulo } = stores[grupo]();
+    return resolverRegistro(lista, rawId, texto, rotulo);
+  };
+
+  /* ----------------------------- concluir ----------------------------- */
+  if (acao === 'concluir') {
+    switch (grupo) {
+      case 'ficha': {
+        const duracao = parseValor(novos.valor) || 50;
+        await useFitnessStore.getState().concluirFichaTreino(rawId, duracao);
+        exibirMensagem(`🏋️ Ficha concluída: ${rawId}`);
+        break;
+      }
+      case 'inbox': {
+        await useInboxStore.getState().toggleInboxTask(achar().id, false);
+        exibirMensagem('✅ Tarefa concluída!');
+        break;
+      }
+      case 'agenda': {
+        await useAgendaStore.getState().toggleItemCompletion(achar().id, false);
+        exibirMensagem('✅ Compromisso concluído!');
+        break;
+      }
+      case 'financas': {
+        const t = achar();
+        // toggle puro reabriria uma conta que já estava paga
+        if ((t.status || 'pago') === 'pago') {
+          return { status: 'sucesso', acao: 'ja_estava_paga', registro: textoFinanca(t) };
+        }
+        await useFinanceStore.getState().toggleTransactionStatus(t.id);
+        exibirMensagem('✅ Conta marcada como paga!');
+        break;
+      }
+      case 'kanban': {
+        await useKanbanStore.getState().moveTask(achar().id, 'done');
+        exibirMensagem('✅ Projeto movido para Concluído!');
+        break;
+      }
+      default:
+        throw new Error(`Não é possível concluir "${args.entidade}".`);
+    }
+    return { status: 'sucesso', acao: 'concluido' };
+  }
+
+  /* ----------------------------- deletar ------------------------------ */
+  if (acao === 'deletar') {
+    let removido = String(rawId);
+    switch (grupo) {
+      case 'ficha':
+        useFitnessStore.getState().deleteFichaTreino(rawId);
+        break;
+      case 'financas': {
+        const t = achar();
+        removido = textoFinanca(t);
+        await useFinanceStore.getState().deleteTransaction(t.id);
+        break;
+      }
+      case 'agenda': {
+        const item = achar();
+        removido = item.title;
+        await useAgendaStore.getState().deleteAgendaItem(item.id);
+        break;
+      }
+      case 'inbox': {
+        const item = achar();
+        removido = item.title;
+        await useInboxStore.getState().deleteInboxTask(item.id);
+        break;
+      }
+      case 'kanban': {
+        const item = achar();
+        removido = item.title;
+        await useKanbanStore.getState().deleteTask(item.id);
+        break;
+      }
+      case 'saude': {
+        const item = achar();
+        removido = item.title;
+        await useFitnessStore.getState().deleteHealthLog(item.id);
+        break;
+      }
+      default:
+        throw new Error(`Não é possível excluir "${args.entidade}".`);
+    }
+    exibirMensagem(`🗑️ Removido: ${removido}`);
+    return { status: 'sucesso', acao: 'deletado', removido };
+  }
+
+  /* ----------------------------- atualizar ---------------------------- */
+  if (acao === 'atualizar') {
+    const novoTitulo = novos.titulo || novos.title || novos.descricao;
+    const novaData = novos.data || novos.date;
+    const novaHora = novos.hora || novos.time;
+
+    switch (grupo) {
+      case 'ficha': {
+        const ficha = useFitnessStore.getState().updateFichaTreino(rawId, {
+          title: novoTitulo || rawId,
+          exercicios: novos.exercicios
+        });
+        if (!ficha) throw new Error(`Ficha "${rawId}" não encontrada.`);
+        exibirMensagem(`💪 Ficha atualizada: ${ficha.title}`);
+        break;
+      }
+      case 'inbox': {
+        const updates = {};
+        if (novoTitulo) updates.title = novoTitulo;
+        if (novaData) updates.date = normalizarData(novaData);
+        await useInboxStore.getState().updateInboxTask(achar().id, updates);
+        exibirMensagem('✏️ Tarefa atualizada!');
+        break;
+      }
+      case 'agenda': {
+        const updates = {};
+        if (novoTitulo) updates.title = novoTitulo;
+        if (novaData) updates.date = normalizarData(novaData);
+        if (novaHora) updates.time = novaHora;
+        await useAgendaStore.getState().updateAgendaItem(achar().id, updates);
+        exibirMensagem('✏️ Compromisso atualizado!');
+        break;
+      }
+      case 'financas': {
+        const original = achar();
+        const { mainTitle, items } = parseFaturaDescription(original.description, original.category);
+
+        let { category, type } = original;
+        if (novos.categoria) ({ category, type } = resolverCategoriaFinanceira(novos.categoria, original.type));
+
+        let amount = Number(original.amount);
+        if (novos.valor !== undefined) {
+          amount = parseValor(novos.valor);
+          if (amount <= 0) throw new Error('Valor inválido: informe um valor maior que zero.');
+        }
+
+        const statusNovo = norm(novos.status);
+        await useFinanceStore.getState().updateTransaction({
+          ...original,
+          // serializa de novo para NÃO apagar os itens de uma fatura ao trocar só o título
+          description: serializeFaturaDescription(novoTitulo ? String(novoTitulo).trim() : mainTitle, category, items),
+          amount,
+          type,
+          category,
+          date: novaData ? normalizarData(novaData, original.date) : original.date,
+          status: ['pago', 'pendente'].includes(statusNovo) ? statusNovo : original.status
+        });
+        exibirMensagem('✏️ Transação atualizada!');
+        break;
+      }
+      case 'kanban': {
+        const card = achar();
+        if (novos.status) await useKanbanStore.getState().moveTask(card.id, novos.status);
+        if (novoTitulo) await useKanbanStore.getState().updateTask(card.id, { title: novoTitulo });
+        exibirMensagem('🔄 Cartão Kanban atualizado.');
+        break;
+      }
+      default:
+        throw new Error(`Não é possível atualizar "${args.entidade}".`);
+    }
+    return { status: 'sucesso', acao: 'atualizado' };
+  }
+
+  throw new Error(`Ação desconhecida: "${args.acao}". Use concluir, deletar ou atualizar.`);
+};
+
+const consultarDados = (args, { exibirMensagem }) => {
+  const relatorio = gerarRelatorioExecutivo();
+  exibirMensagem(`📊 Consultando base (${args.entidade || 'geral'})...`);
+
+  const grupo = grupoDe(args.entidade);
+  let recorte = relatorio;
+  if (grupo === 'financas') recorte = relatorio.resumo_financeiro;
+  else if (grupo === 'ficha' || grupo === 'saude') recorte = relatorio.saude_fitness;
+  else if (['agenda', 'inbox', 'kanban'].includes(grupo)) recorte = relatorio.produtividade;
+
+  return relatorio.aviso_dados ? { aviso_dados: relatorio.aviso_dados, ...recorte } : recorte;
+};
+
+const executarFerramenta = async (name, args, ctx) => {
+  switch (name) {
+    case 'pesquisar_internet': {
+      const consulta = String(args.consulta || args.query || '').trim();
+      ctx.exibirMensagem(`🌐 Pesquisando na web: "${consulta}"...`);
+      const resultado = await buscarNaWeb(consulta);
+      if (resultado.fontes_consultadas?.length) ctx.exibirMensagem(`🌐 Fonte: ${resultado.fontes_consultadas[0]}`);
+      return resultado;
+    }
+    case 'gerenciar_ficha_treino':
+      return gerenciarFichaTreino(args, ctx);
+    case 'registrar_dado':
+      return registrarDado(args, ctx);
+    case 'alterar_dado':
+      return alterarDado(args, ctx);
+    case 'consultar_dados':
+      return consultarDados(args, ctx);
+    default:
+      return { status: 'erro', mensagem: `Ferramenta desconhecida: ${name}` };
+  }
+};
+
+/* ================================================================== */
+/* Componente                                                          */
+/* ================================================================== */
+
 export default function BarraComandoIA() {
-  const [aiState, setAiState] = useState('idle'); 
-  const aiStateRef = useRef('idle'); 
+  const [aiState, setAiState] = useState('idle');
+  const aiStateRef = useRef('idle');
 
   const [isIntercomActive, setIsIntercomActive] = useState(false);
   const [ultimaMensagem, setUltimaMensagem] = useState(null);
-  
-  // Estado visual do locutor identificado pela biometria vocal
-  const [speakerInfo, setSpeakerInfo] = useState(null); // { locutor: 'Yuri' | 'Visitante', confianca: 95, pitchHz: 120 }
-  
+
+  // Locutor identificado pela biometria vocal: { locutor: 'Yuri' | 'Visitante', confianca, pitchHz }
+  const [speakerInfo, setSpeakerInfo] = useState(null);
+
   const liveConnectionRef = useRef(null);
   const audioManagerRef = useRef(null);
   const speakingTimeoutRef = useRef(null);
   const mensagemTimeoutRef = useRef(null);
-  const hasGreetedRef = useRef(false); 
+  const processingTimeoutRef = useRef(null);
+  const saudacaoTimeoutRef = useRef(null);
+  const hasGreetedRef = useRef(false);
+  const sessaoRef = useRef(0); // invalida callbacks e inicializações de sessões já encerradas
+  const ultimoLocutorRef = useRef(null);
 
   const updateAiState = (newState) => {
     aiStateRef.current = newState;
     setAiState(newState);
+
+    // Se a IA decidir não responder (ex.: conversa paralela), não fica "processando" para sempre
+    clearTimeout(processingTimeoutRef.current);
+    if (newState === 'processing') {
+      processingTimeoutRef.current = setTimeout(() => {
+        if (aiStateRef.current === 'processing') updateAiState('listening');
+      }, PROCESSING_TIMEOUT_MS);
+    }
   };
 
   useEffect(() => {
     useChatStore.getState().fetchMemoria?.();
   }, []);
 
-  const limparMarkdown = (texto) => {
-    if (!texto) return '';
-    return texto.replace(/[*_~`#>-]/g, '').trim();
-  };
-
-  const hidratarStoresSeNecessario = async () => {
-    const promises = [];
-    if (useFinanceStore.getState().transactions.length === 0) {
-      promises.push(useFinanceStore.getState().fetchTransactions());
-    }
-    if (useAgendaStore.getState().agendaItems.length === 0) {
-      promises.push(useAgendaStore.getState().fetchAgendaItems());
-    }
-    if (useInboxStore.getState().inboxTasks.length === 0) {
-      promises.push(useInboxStore.getState().fetchInboxTasks());
-    }
-    if (useKanbanStore.getState().tasks.length === 0) {
-      promises.push(useKanbanStore.getState().fetchKanbanTasks());
-    }
-    if (useFitnessStore.getState().healthLogs.length === 0) {
-      promises.push(useFitnessStore.getState().fetchHealthLogs?.());
-    }
-    if (promises.length > 0) {
-      await Promise.allSettled(promises);
-    }
-  };
-
-  const gerarRelatorioExecutivo = () => {
-    const dataHoje = getLocalTodayISO();
-    const mesAtualPrefix = dataHoje.substring(0, 7);
-    const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    const { transactions, balance, investedBalance } = useFinanceStore.getState();
-    const { agendaItems } = useAgendaStore.getState();
-    const { inboxTasks } = useInboxStore.getState();
-    const { tasks: kanbanTasks } = useKanbanStore.getState();
-    const { healthLogs, fichasTreino } = useFitnessStore.getState();
-
-    let receitasPagasMes = 0;
-    let despesasOperacionaisPagasMes = 0;
-    let contasAPagarMes = 0;
-    let contasAReceberMes = 0;
-    let aportesMes = 0;
-    const gastosPorCategoria = {};
-
-    transactions.forEach((t) => {
-      const tDate = t.date && t.date.includes('/') 
-        ? t.date.split('/').reverse().join('-') 
-        : (t.date || '');
-      
-      if (tDate.startsWith(mesAtualPrefix)) {
-        const val = Number(t.amount) || 0;
-        const isPago = (t.status || 'pago') === 'pago';
-        const isAporte = t.category === 'Aporte de Investimento';
-        const isResgate = t.category === 'Resgate de Investimento';
-
-        if (t.type === 'receita') {
-          if (isPago && !isResgate) receitasPagasMes += val;
-          else if (!isPago) contasAReceberMes += val;
-        } else if (t.type === 'despesa') {
-          if (isPago) {
-            if (isAporte) aportesMes += val;
-            else {
-              despesasOperacionaisPagasMes += val;
-              gastosPorCategoria[t.category] = (gastosPorCategoria[t.category] || 0) + val;
-            }
-          } else {
-            contasAPagarMes += val;
-          }
-        }
-      }
-    });
-
-    const balancoLiquidoMes = receitasPagasMes - despesasOperacionaisPagasMes;
-    const saldoProjetadoFimDoMes = balance + contasAReceberMes - contasAPagarMes;
-    const margemParaReserva = Math.max(0, saldoProjetadoFimDoMes - 300);
-
-    const contasPendentesLista = transactions
-      .filter(t => (t.status || 'pago') === 'pendente')
-      .slice(0, 12)
-      .map(t => ({ id: t.id, descricao: t.description.split(' [')[0], valor: t.amount, vencimento: t.date, tipo: t.type }));
-
-    const compromissosProximos = agendaItems
-      .filter(e => !e.is_completed && e.date >= dataHoje)
-      .slice(0, 15)
-      .map(e => ({ id: e.id, titulo: e.title, data: e.date, hora: e.time, categoria: e.category }));
-
-    const tarefasPendentes = inboxTasks
-      .filter(t => !t.completed)
-      .slice(0, 15)
-      .map(t => ({ id: t.id, titulo: t.title, data: t.date }));
-
-    const projetosKanban = kanbanTasks
-      .slice(0, 12)
-      .map(k => ({ id: k.id, titulo: k.title, coluna: k.status }));
-
-    const treinosRealizados = (healthLogs || []).filter(l => l.type === 'treino');
-    const ultimoPesoObj = (healthLogs || []).find(l => l.type === 'peso');
-    const ultimasMedidas = {};
-    (healthLogs || [])
-      .filter(l => l.type === 'medida')
-      .forEach(m => {
-        if (!ultimasMedidas[m.title]) ultimasMedidas[m.title] = `${m.value}${m.unit || 'cm'}`;
-      });
-
-    return {
-      data_hoje: dataHoje,
-      hora_atual: horaAtual,
-      resumo_financeiro: {
-        saldo_atual_em_conta: Number(balance.toFixed(2)),
-        total_investido_na_carteira: Number((investedBalance || 0).toFixed(2)),
-        receitas_pagas_no_mes: Number(receitasPagasMes.toFixed(2)),
-        despesas_operacionais_pagas_no_mes: Number(despesasOperacionaisPagasMes.toFixed(2)),
-        aportes_investidos_no_mes: Number(aportesMes.toFixed(2)),
-        balanco_operacional_do_mes: Number(balancoLiquidoMes.toFixed(2)),
-        contas_pendentes_a_pagar_no_mes: Number(contasAPagarMes.toFixed(2)),
-        saldo_projetado_apos_pagar_pendencias: Number(saldoProjetadoFimDoMes.toFixed(2)),
-        sugestao_segura_para_guardar_na_reserva_agora: Number(margemParaReserva.toFixed(2)),
-        gastos_por_categoria_no_mes: gastosPorCategoria,
-        contas_pendentes_detalhadas: contasPendentesLista
-      },
-      produtividade: {
-        compromissos_agenda: compromissosProximos,
-        tarefas_inbox_pendentes: tarefasPendentes,
-        quadro_kanban: projetosKanban
-      },
-      saude_fitness: {
-        fichas_de_treino_atuais: fichasTreino,
-        total_treinos_concluidos: treinosRealizados.length,
-        ultimo_peso_kg: ultimoPesoObj ? ultimoPesoObj.value : null,
-        medidas_corporais_atuais: ultimasMedidas,
-        ultimos_registros_sono: (healthLogs || []).filter(l => l.type === 'sono').slice(0, 5),
-        ultimos_registros_humor: (healthLogs || []).filter(l => l.type === 'humor').slice(0, 5)
-      }
-    };
-  };
-
-  const gerarContextoDinâmico = () => {
-    return JSON.stringify(gerarRelatorioExecutivo(), null, 2);
-  };
-
-  const resolverIdPorNomeOuId = (lista, idOuTexto, campoTexto = 'title') => {
-    if (!idOuTexto) return null;
-    const alvoStr = String(idOuTexto).toLowerCase().trim();
-    const porId = lista.find(item => String(item.id) === String(idOuTexto));
-    if (porId) return porId.id;
-    const porNome = lista.find(item => (item[campoTexto] || '').toLowerCase().includes(alvoStr));
-    return porNome ? porNome.id : idOuTexto;
-  };
-
   const exibirMensagem = (texto) => {
     setUltimaMensagem(texto);
-    if (mensagemTimeoutRef.current) clearTimeout(mensagemTimeoutRef.current);
+    clearTimeout(mensagemTimeoutRef.current);
     mensagemTimeoutRef.current = setTimeout(() => setUltimaMensagem(null), 8000);
   };
 
   const obterSaudacaoTemporal = () => {
     const hora = new Date().getHours();
-    if (hora >= 5 && hora < 12) return "Bom dia";
-    if (hora >= 12 && hora < 18) return "Boa tarde";
-    return "Boa noite";
+    if (hora >= 5 && hora < 12) return 'Bom dia';
+    if (hora >= 12 && hora < 18) return 'Boa tarde';
+    return 'Boa noite';
   };
 
   const handleRecalibrarVoz = () => {
-    if (audioManagerRef.current && audioManagerRef.current.resetarPerfilVocal) {
+    if (audioManagerRef.current?.resetarPerfilVocal) {
       audioManagerRef.current.resetarPerfilVocal();
       setSpeakerInfo(null);
-      exibirMensagem("🎙️ Perfil resetado! Fale uma frase normalmente para calibrar sua voz.");
+      ultimoLocutorRef.current = null;
+      exibirMensagem('🎙️ Perfil resetado! Fale uma frase normalmente para calibrar sua voz.');
     }
   };
 
   const ligarSistema = async () => {
+    const sessao = ++sessaoRef.current;
+    const ativa = () => sessaoRef.current === sessao;
+
     updateAiState('starting');
     setIsIntercomActive(true);
 
     try {
       await hidratarStoresSeNecessario();
+      if (!ativa()) return;
 
-      audioManagerRef.current = new GerenciadorDeAudio();
-      
+      const audio = new GerenciadorDeAudio();
+      audioManagerRef.current = audio;
+
       const aoCaptarSom = (base64Pcm) => {
-        if (liveConnectionRef.current) liveConnectionRef.current.enviarAudioVoz(base64Pcm);
+        if (ativa()) liveConnectionRef.current?.enviarAudioVoz(base64Pcm);
       };
 
-      // =========================================================================
-      // DETECTOR DE SILÊNCIO INTEGRADO COM BIOMETRIA VOCAL (Yuri vs. Visitante)
-      // =========================================================================
+      // Silêncio detectado + biometria vocal (Yuri vs. Visitante)
       const aoDetectarSilencio = (analiseLocutor) => {
-        if (liveConnectionRef.current && aiStateRef.current === 'listening') {
-          if (analiseLocutor) {
-            setSpeakerInfo(analiseLocutor);
+        if (!ativa() || !liveConnectionRef.current || aiStateRef.current !== 'listening') return;
 
-            if (analiseLocutor.recemCalibrado) {
-              exibirMensagem(`🎙️ Biometria vocal do Yuri calibrada (${analiseLocutor.pitchHz} Hz)`);
-            }
+        ultimoLocutorRef.current = analiseLocutor?.locutor ?? null;
+
+        if (analiseLocutor) {
+          setSpeakerInfo(analiseLocutor);
+          if (analiseLocutor.recemCalibrado) {
+            exibirMensagem(`🎙️ Biometria vocal do Yuri calibrada (${analiseLocutor.pitchHz} Hz)`);
           }
-
-          if (analiseLocutor && analiseLocutor.locutor === 'Visitante') {
-            exibirMensagem(`👥 Voz externa detectada (${analiseLocutor.confianca}% similaridade)`);
-            liveConnectionRef.current.enviarComandoSilencioso(
-              `[AVISO DO SENSOR ACÚSTICO: A fala anterior partiu de uma VOZ EXTERNA/VISITANTE no ambiente (Timbre medido: ${analiseLocutor.pitchHz}Hz vs Perfil de Yuri: ${analiseLocutor.perfilPitchHz}Hz). Se essa pessoa estiver falando diretamente com você, responda cordialmente tratando-a como convidado do Yuri. TRAVA DE SEGURANÇA: Não apague dados nem registre finanças para vozes externas sem confirmação do Yuri. Se for apenas conversa paralela que não é com você, ignore.]`
-            );
-          } else {
-            liveConnectionRef.current.forcarResposta();
-          }
-
-          updateAiState('processing'); 
         }
+
+        if (analiseLocutor?.locutor === 'Visitante') {
+          exibirMensagem(`👥 Voz externa detectada (${analiseLocutor.confianca}% similaridade)`);
+          // A trava real fica no código (ver aoReceberChamadaDeFuncao); este aviso só orienta a conversa
+          liveConnectionRef.current.enviarComandoSilencioso(
+            `[AVISO DO SENSOR ACÚSTICO: A fala anterior partiu de uma VOZ EXTERNA/VISITANTE (timbre ${analiseLocutor.pitchHz}Hz vs perfil do Yuri ${analiseLocutor.perfilPitchHz}Hz). Se a pessoa estiver falando com você, responda cordialmente como a um convidado do Yuri. O sistema BLOQUEIA registrar, alterar ou apagar dados por voz externa; apenas consultas e pesquisas funcionam. Se for conversa paralela que não é com você, ignore.]`
+          );
+        } else {
+          liveConnectionRef.current.forcarResposta();
+        }
+
+        updateAiState('processing');
       };
 
       const aoComecarFalar = () => {
+        if (!ativa()) return;
         if (aiStateRef.current === 'speaking' || aiStateRef.current === 'processing') {
-          if (audioManagerRef.current) audioManagerRef.current.pararAudioAtual();
-          if (liveConnectionRef.current) liveConnectionRef.current.interromperGeracao();
+          audioManagerRef.current?.pararAudioAtual();
+          liveConnectionRef.current?.interromperGeracao();
         }
         updateAiState('listening');
       };
 
       const aoReceberAudioDaIA = (base64Audio) => {
-        updateAiState('speaking'); 
-        if (audioManagerRef.current) audioManagerRef.current.tocarAudio(base64Audio);
-        if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+        if (!ativa()) return;
+        updateAiState('speaking');
+        audioManagerRef.current?.tocarAudio(base64Audio);
+        clearTimeout(speakingTimeoutRef.current);
         speakingTimeoutRef.current = setTimeout(() => {
           if (aiStateRef.current === 'speaking') updateAiState('listening');
-        }, 1500); 
+        }, 1500);
       };
 
       const aoReceberTextoDaIA = (textoBruto) => {
+        if (!ativa()) return;
         const textoLimpo = limparMarkdown(textoBruto);
-        if (textoLimpo.match(/^(Complying|Prioritizing|I've|I will|I am|Thinking|Understood|Processing)/i)) return;
-
+        if (/^(Complying|Prioritizing|I've|I will|I am|Thinking|Understood|Processing)/i.test(textoLimpo)) return;
         if (textoLimpo.length > 0) {
           exibirMensagem(textoLimpo);
           useChatStore.getState().adicionarMemoria?.(textoLimpo);
         }
       };
 
-      // =========================================================================
-      // ROTEADOR DE FUNÇÕES DA IA
-      // =========================================================================
-      const aoReceberChamadaDeFuncao = async (functionCallInfo) => {
-        updateAiState('processing'); 
-        const { id, name, args } = functionCallInfo;
-        const dataHoje = getLocalTodayISO();
+      // Roteador: toda chamada recebe exatamente UMA resposta (sucesso ou erro)
+      const aoReceberChamadaDeFuncao = async (info) => {
+        if (!ativa()) return;
+        updateAiState('processing');
+        const { id, name } = info;
+        const args = info.args || {};
+        let resposta;
 
         try {
-          // 0. FERRAMENTA DE PESQUISA NA INTERNET EM TEMPO REAL
-          if (name === "pesquisar_internet") {
-            const consulta = (args?.consulta || args?.query || "").trim();
-            exibirMensagem(`🌐 Pesquisando na web: "${consulta}"...`);
-            
-            const resultadoWeb = await buscarNaWebComGemini(consulta);
-            
-            if (resultadoWeb.fontes_consultadas?.length > 0) {
-              exibirMensagem(`🌐 Fonte: ${resultadoWeb.fontes_consultadas[0]}`);
-            }
-            
-            liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, resultadoWeb);
-            return;
+          if (MUTACOES.has(name) && ultimoLocutorRef.current === 'Visitante') {
+            exibirMensagem('🔒 Comando bloqueado: voz não reconhecida como a do Yuri.');
+            resposta = {
+              status: 'erro',
+              mensagem: 'Bloqueado: a última fala veio de uma voz externa. Peça ao Yuri para repetir o comando por voz.'
+            };
+          } else {
+            resposta = await executarFerramenta(name, args, { exibirMensagem });
           }
-
-          // 1. FERRAMENTA DEDICADA DE FICHAS DE TREINO
-          if (name === "gerenciar_ficha_treino") {
-            const acao = (args.acao || 'criar').toLowerCase().trim();
-            const titulo = (args.titulo || 'Nova Ficha de Treino').trim();
-            const exercicios = Array.isArray(args.exercicios) ? args.exercicios : [];
-
-            if (acao === 'criar') {
-              const novaFicha = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
-              exibirMensagem(`💪 Ficha criada: ${novaFicha.title} (${novaFicha.exercicios.length} exercícios)`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                status: "sucesso",
-                acao: "ficha_criada_na_aba_treinos",
-                ficha: novaFicha
-              });
-            } 
-            else if (acao === 'substituir_todas') {
-              useFitnessStore.getState().setFichasTreino([]);
-              const novaFicha = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
-              exibirMensagem(`🔥 Base de fichas recriada: ${novaFicha.title}`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                status: "sucesso",
-                acao: "base_substituida_e_ficha_criada",
-                ficha: novaFicha
-              });
-            }
-            else if (acao === 'atualizar') {
-              let fichaEditada = useFitnessStore.getState().updateFichaTreino(titulo, {
-                title: titulo,
-                exercicios: exercicios.length > 0 ? exercicios : undefined
-              });
-              if (!fichaEditada) {
-                fichaEditada = useFitnessStore.getState().addFichaTreino(titulo, exercicios);
-              }
-              exibirMensagem(`💪 Ficha atualizada: ${fichaEditada.title}`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                status: "sucesso",
-                ficha: fichaEditada
-              });
-            } 
-            else if (acao === 'deletar') {
-              useFitnessStore.getState().deleteFichaTreino(titulo);
-              exibirMensagem(`🗑️ Ficha removida: ${titulo}`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                status: "sucesso",
-                ficha_deletada: titulo
-              });
-            }
-            return;
-          }
-
-          // 2. FERRAMENTA DE REGISTROS GERAIS
-          if (name === "registrar_dado") {
-            const entidade = (args.entidade || '').toLowerCase().trim();
-            const dados = args.dados || args || {};
-
-            const tituloFinal = (
-              dados.titulo || dados.title || dados.descricao || 
-              dados.description || dados.modalidade || dados.nome || "Novo Registro"
-            ).trim();
-
-            const valorFinal = Number(
-              dados.valor ?? dados.amount ?? dados.peso ?? dados.duracao ?? 0
-            );
-
-            const dataFinal = dados.data || dados.date || dataHoje;
-            const horaFinal = dados.hora || dados.time || null;
-            const categoriaFinal = dados.categoria || dados.category || null;
-            const statusFinal = dados.status || null;
-
-            // INTERCEPTADOR ANTI-INBOX: Se vier lista de exercícios ou entidade de ficha, salva como Ficha de Treino!
-            if (
-              entidade === 'ficha_treino' || 
-              entidade === 'ficha' || 
-              (Array.isArray(dados.exercicios) && dados.exercicios.length > 0)
-            ) {
-              const novaFicha = useFitnessStore.getState().addFichaTreino(tituloFinal, dados.exercicios || []);
-              exibirMensagem(`💪 Ficha criada: ${novaFicha.title}`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                status: "sucesso",
-                entidade: "ficha_treino",
-                ficha_criada: novaFicha
-              });
-              return;
-            }
-
-            switch (entidade) {
-              case 'agenda':
-              case 'evento':
-              case 'compromisso': {
-                const novoEvento = await useAgendaStore.getState().addAgendaItem({ 
-                  title: tituloFinal, 
-                  date: dataFinal, 
-                  time: horaFinal,
-                  category: categoriaFinal || 'evento'
-                });
-                exibirMensagem(`📅 Agenda: ${tituloFinal} (${dataFinal})`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "agenda",
-                  registro_criado: novoEvento
-                });
-                break;
-              }
-
-              case 'inbox':
-              case 'tarefa': {
-                const novaTarefa = await useInboxStore.getState().addInboxTask(tituloFinal, dataFinal);
-                exibirMensagem(`📥 Tarefa: ${tituloFinal}`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "inbox",
-                  registro_criado: novaTarefa
-                });
-                break;
-              }
-
-              case 'kanban':
-              case 'projeto': {
-                const colStatus = ['backlog', 'in-progress', 'done'].includes(statusFinal) ? statusFinal : 'backlog';
-                const novoCard = await useKanbanStore.getState().addTask(tituloFinal, colStatus);
-                exibirMensagem(`📋 Kanban: ${tituloFinal}`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "kanban",
-                  registro_criado: novoCard
-                });
-                break;
-              }
-
-              case 'despesa':
-              case 'gasto': {
-                const novaDespesa = await useFinanceStore.getState().addTransaction({ 
-                  amount: valorFinal, 
-                  description: tituloFinal, 
-                  type: 'despesa', 
-                  category: categoriaFinal || 'Outros', 
-                  date: dataFinal, 
-                  status: statusFinal === 'pendente' ? 'pendente' : 'pago' 
-                });
-                exibirMensagem(`💸 Despesa: ${tituloFinal} (R$ ${valorFinal.toFixed(2)})`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "despesa",
-                  registro_criado: novaDespesa,
-                  novo_saldo: useFinanceStore.getState().balance
-                });
-                break;
-              }
-
-              case 'receita':
-              case 'ganho': {
-                const novaReceita = await useFinanceStore.getState().addTransaction({ 
-                  amount: valorFinal, 
-                  description: tituloFinal, 
-                  type: 'receita', 
-                  category: categoriaFinal || 'Outros', 
-                  date: dataFinal, 
-                  status: statusFinal === 'pendente' ? 'pendente' : 'pago' 
-                });
-                exibirMensagem(`📈 Receita: ${tituloFinal} (R$ ${valorFinal.toFixed(2)})`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  entidade: "receita",
-                  registro_criado: novaReceita,
-                  novo_saldo: useFinanceStore.getState().balance
-                });
-                break;
-              }
-
-              case 'peso': {
-                await useFitnessStore.getState().addHealthLog('peso', 'Peso', valorFinal, 'kg');
-                exibirMensagem(`⚖️ Peso registrado: ${valorFinal} kg`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", valor_kg: valorFinal });
-                break;
-              }
-
-              case 'treino':
-              case 'treino_concluido': {
-                const duracao = valorFinal > 0 ? valorFinal : 50;
-                await useFitnessStore.getState().concluirFichaTreino(tituloFinal, duracao);
-                exibirMensagem(`🏋️ Treino concluído: ${tituloFinal} (${duracao} min)`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", treino: tituloFinal });
-                break;
-              }
-
-              case 'medida': {
-                await useFitnessStore.getState().addHealthLog('medida', tituloFinal, valorFinal, 'cm');
-                exibirMensagem(`📏 Medida (${tituloFinal}): ${valorFinal} cm`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", medida: tituloFinal, valor_cm: valorFinal });
-                break;
-              }
-
-              case 'sono': {
-                const horas = valorFinal > 0 ? valorFinal : 7.5;
-                await useFitnessStore.getState().addHealthLog('sono', `Sono: ${tituloFinal}`, horas, 'h');
-                exibirMensagem(`🌙 Sono registrado: ${horas}h (${tituloFinal})`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", horas_dormidas: horas });
-                break;
-              }
-
-              case 'humor':
-              case 'mente': {
-                const notaHumor = valorFinal >= 1 && valorFinal <= 5 ? valorFinal : 4;
-                await useFitnessStore.getState().addHealthLog('humor', `Humor: ${tituloFinal}`, notaHumor, '/5');
-                exibirMensagem(`🧠 Check-in Mental: ${notaHumor}/5 (${tituloFinal})`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", nota: notaHumor });
-                break;
-              }
-
-              default: {
-                const fallbackTask = await useInboxStore.getState().addInboxTask(tituloFinal, dataFinal);
-                exibirMensagem(`📥 Inbox: ${tituloFinal}`);
-                liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-                  status: "sucesso",
-                  registro_criado: fallbackTask
-                });
-              }
-            }
-          } 
-          
-          // 3. FERRAMENTA DE ALTERAÇÃO / CONCLUSÃO / EXCLUSÃO
-          else if (name === "alterar_dado") {
-            const acao = (args.acao || '').toLowerCase().trim();
-            const entidade = (args.entidade || '').toLowerCase().trim();
-            const rawId = args.id;
-
-            if (acao === 'concluir') {
-              if (entidade === 'ficha_treino' || entidade === 'treino') {
-                const duracao = args.dados?.valor || 50;
-                await useFitnessStore.getState().concluirFichaTreino(rawId, duracao);
-                exibirMensagem(`🏋️ Ficha concluída: ${rawId}`);
-              } else if (entidade === 'inbox' || entidade === 'tarefa') {
-                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
-                await useInboxStore.getState().toggleInboxTask(targetId, false);
-                exibirMensagem(`✅ Tarefa concluída!`);
-              } else if (entidade === 'agenda' || entidade === 'evento') {
-                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
-                await useAgendaStore.getState().toggleItemCompletion(targetId, false);
-                exibirMensagem(`✅ Compromisso concluído!`);
-              } else if (entidade === 'financas') {
-                const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
-                await useFinanceStore.getState().toggleTransactionStatus(targetId);
-                exibirMensagem(`✅ Conta marcada como paga!`);
-              } else if (entidade === 'kanban') {
-                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
-                await useKanbanStore.getState().moveTask(targetId, 'done');
-                exibirMensagem(`✅ Projeto movido para Concluído!`);
-              }
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "concluido" });
-            } 
-            else if (acao === 'deletar' || acao === 'excluir') {
-              if (entidade === 'ficha_treino') {
-                useFitnessStore.getState().deleteFichaTreino(rawId);
-              } else if (entidade === 'financas') {
-                const targetId = resolverIdPorNomeOuId(useFinanceStore.getState().transactions, rawId, 'description');
-                await useFinanceStore.getState().deleteTransaction(targetId);
-              } else if (entidade === 'agenda') {
-                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
-                await useAgendaStore.getState().deleteAgendaItem(targetId);
-              } else if (entidade === 'inbox') {
-                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
-                await useInboxStore.getState().deleteInboxTask(targetId);
-              } else if (entidade === 'kanban') {
-                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
-                await useKanbanStore.getState().deleteTask(targetId);
-              } else {
-                const targetId = resolverIdPorNomeOuId(useFitnessStore.getState().healthLogs, rawId, 'title');
-                await useFitnessStore.getState().deleteHealthLog(targetId);
-              }
-              exibirMensagem(`🗑️ Registro removido.`);
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "deletado" });
-            }
-            else if (acao === 'atualizar') {
-              const novosDados = args.dados || {};
-              if (entidade === 'ficha_treino') {
-                const fichaEditada = useFitnessStore.getState().updateFichaTreino(rawId, {
-                  title: novosDados.titulo || novosDados.title || rawId,
-                  exercicios: novosDados.exercicios
-                });
-                exibirMensagem(`💪 Ficha atualizada: ${fichaEditada?.title || rawId}`);
-              } else if (entidade === 'inbox' || entidade === 'tarefa') {
-                const targetId = resolverIdPorNomeOuId(useInboxStore.getState().inboxTasks, rawId, 'title');
-                const updates = {};
-                if (novosDados.titulo || novosDados.title) updates.title = novosDados.titulo || novosDados.title;
-                if (novosDados.data || novosDados.date) updates.date = novosDados.data || novosDados.date;
-                await useInboxStore.getState().updateInboxTask(targetId, updates);
-                exibirMensagem(`✏️ Tarefa atualizada!`);
-              } else if (entidade === 'agenda' || entidade === 'evento') {
-                const targetId = resolverIdPorNomeOuId(useAgendaStore.getState().agendaItems, rawId, 'title');
-                const updates = {};
-                if (novosDados.titulo || novosDados.title) updates.title = novosDados.titulo || novosDados.title;
-                if (novosDados.data || novosDados.date) updates.date = novosDados.data || novosDados.date;
-                if (novosDados.hora || novosDados.time) updates.time = novosDados.hora || novosDados.time;
-                await useAgendaStore.getState().updateAgendaItem(targetId, updates);
-                exibirMensagem(`✏️ Compromisso atualizado!`);
-              } else if (entidade === 'financas') {
-                const listaFin = useFinanceStore.getState().transactions;
-                const targetId = resolverIdPorNomeOuId(listaFin, rawId, 'description');
-                const transacaoOriginal = listaFin.find(t => String(t.id) === String(targetId));
-                if (transacaoOriginal) {
-                  await useFinanceStore.getState().updateTransaction({
-                    ...transacaoOriginal,
-                    description: novosDados.titulo || novosDados.descricao || transacaoOriginal.description,
-                    amount: novosDados.valor !== undefined ? Number(novosDados.valor) : transacaoOriginal.amount,
-                    date: novosDados.data || transacaoOriginal.date,
-                    status: novosDados.status || transacaoOriginal.status,
-                    category: novosDados.categoria || transacaoOriginal.category
-                  });
-                  exibirMensagem(`✏️ Transação atualizada!`);
-                }
-              } else if (entidade === 'kanban') {
-                const targetId = resolverIdPorNomeOuId(useKanbanStore.getState().tasks, rawId, 'title');
-                if (novosDados.status) await useKanbanStore.getState().moveTask(targetId, novosDados.status);
-                if (novosDados.titulo || novosDados.title) {
-                  await useKanbanStore.getState().updateTask(targetId, { title: novosDados.titulo || novosDados.title });
-                }
-                exibirMensagem(`🔄 Cartão Kanban atualizado.`);
-              }
-              liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, { status: "sucesso", acao: "atualizado" });
-            }
-          } 
-          
-          // 4. FERRAMENTA DE CONSULTA
-          else if (name === "consultar_dados") {
-            const relatorioCompleto = gerarRelatorioExecutivo();
-            let respostaConsulta = {};
-
-            if (args.entidade === 'financas') respostaConsulta = relatorioCompleto.resumo_financeiro;
-            else if (args.entidade === 'treino') respostaConsulta = relatorioCompleto.saude_fitness;
-            else if (['agenda', 'inbox', 'kanban'].includes(args.entidade)) respostaConsulta = relatorioCompleto.produtividade;
-            else respostaConsulta = relatorioCompleto;
-
-            exibirMensagem(`📊 Consultando base (${args.entidade || 'geral'})...`);
-            liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, respostaConsulta);
-          }
-
         } catch (erro) {
-          console.error("[Bastian] Erro ao executar ferramenta:", erro);
-          exibirMensagem(`⚠️ Erro ao processar comando: ${erro.message || 'Falha'}`);
-          liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, {
-            status: "erro",
-            mensagem: erro.message || "Falha ao executar comando."
-          });
+          console.error('[Bastian] Erro ao executar ferramenta:', erro);
+          exibirMensagem(`⚠️ ${erro.message || 'Falha ao processar comando'}`);
+          resposta = { status: 'erro', mensagem: erro.message || 'Falha ao executar comando.' };
         }
+
+        if (ativa()) liveConnectionRef.current?.enviarRespostaDeFuncao(id, name, resposta);
       };
 
-      liveConnectionRef.current = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA, aoReceberChamadaDeFuncao);
-      await liveConnectionRef.current.conectar(gerarContextoDinâmico());
-      await audioManagerRef.current.inicializar(aoCaptarSom, aoDetectarSilencio, aoComecarFalar); 
+      const conexao = new GeminiLiveConnection(aoReceberAudioDaIA, aoReceberTextoDaIA, aoReceberChamadaDeFuncao, {
+        // O usuário falou por cima da IA: para o áudio que ainda estava na fila
+        onInterrupted: () => {
+          if (ativa()) audioManagerRef.current?.pararAudioAtual();
+        },
+        // A conexão caiu e não foi possível retomar a sessão: desliga de forma limpa e avisa
+        onClose: () => {
+          if (!ativa()) return;
+          desligarSistema();
+          exibirMensagem('⚠️ A conexão com a IA caiu. Toque no orbe para reativar.');
+        }
+      });
+      liveConnectionRef.current = conexao;
+      // Função (e não texto fixo): o snapshot é refeito se a sessão for retomada
+      await conexao.conectar(() => JSON.stringify(gerarRelatorioExecutivo(), null, 2));
+      if (!ativa()) return; // desligarSistema já encerrou conexão e áudio
+
+      await audio.inicializar(aoCaptarSom, aoDetectarSilencio, aoComecarFalar);
+      if (!ativa()) {
+        audio.parar(); // o desligar pode ter rodado antes de o microfone abrir
+        return;
+      }
 
       const saudacao = obterSaudacaoTemporal();
-
-      setTimeout(() => {
-        if (liveConnectionRef.current) {
-          if (!hasGreetedRef.current) {
-            liveConnectionRef.current.enviarComandoSilencioso(`Responda apenas com esta frase exata: "${saudacao}, senhor. Como posso ajudar?"`);
-            hasGreetedRef.current = true;
-          } else {
-            liveConnectionRef.current.enviarComandoSilencioso("Responda apenas com a frase: 'Pois não?'");
-          }
+      saudacaoTimeoutRef.current = setTimeout(() => {
+        if (!ativa() || !liveConnectionRef.current) return;
+        if (!hasGreetedRef.current) {
+          liveConnectionRef.current.enviarComandoSilencioso(
+            `Responda apenas com esta frase exata: "${saudacao}, senhor. Como posso ajudar?"`
+          );
+          hasGreetedRef.current = true;
+        } else {
+          liveConnectionRef.current.enviarComandoSilencioso("Responda apenas com a frase: 'Pois não?'");
         }
-      }, 1000); 
+      }, 1000);
 
       updateAiState('listening');
-
     } catch (erro) {
-      console.error("[Bastian] Erro crítico ao ligar sistema:", erro);
+      if (!ativa()) return;
+      console.error('[Bastian] Erro crítico ao ligar sistema:', erro);
       desligarSistema();
-      alert("Falha crítica no sistema neural.");
+      exibirMensagem('⚠️ Não foi possível ativar o Bastian. Verifique a conexão e a permissão do microfone.');
     }
   };
 
   const desligarSistema = () => {
+    sessaoRef.current += 1; // invalida qualquer inicialização ou callback em andamento
+
     if (audioManagerRef.current) { audioManagerRef.current.parar(); audioManagerRef.current = null; }
     if (liveConnectionRef.current) { liveConnectionRef.current.desconectar(); liveConnectionRef.current = null; }
-    if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+
+    clearTimeout(speakingTimeoutRef.current);
+    clearTimeout(processingTimeoutRef.current);
+    clearTimeout(saudacaoTimeoutRef.current);
+    clearTimeout(mensagemTimeoutRef.current);
+    confirmacoesPendentes.clear();
+    ultimoLocutorRef.current = null;
+
     setIsIntercomActive(false);
     setSpeakerInfo(null);
-    updateAiState('idle');
+    aiStateRef.current = 'idle';
+    setAiState('idle');
     setUltimaMensagem(null);
   };
 
@@ -834,7 +1018,7 @@ export default function BarraComandoIA() {
     else ligarSistema();
   };
 
-  useEffect(() => { return () => desligarSistema(); }, []);
+  useEffect(() => () => desligarSistema(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getRingColorClass = () => {
     if (!isIntercomActive) return 'text-slate-600/40 drop-shadow-none';
@@ -842,7 +1026,7 @@ export default function BarraComandoIA() {
       case 'listening': return 'text-cyan-400 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)]';
       case 'processing': return 'text-amber-400 drop-shadow-[0_0_15px_rgba(251,191,36,0.8)]';
       case 'speaking': return 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.8)]';
-      default: return 'text-cyan-700/60'; 
+      default: return 'text-cyan-700/60';
     }
   };
 
@@ -858,30 +1042,30 @@ export default function BarraComandoIA() {
 
   return (
     <div className="fixed bottom-6 right-4 sm:right-8 z-50 flex flex-col items-end gap-2.5 pointer-events-none">
-      
+
       {/* BALÃO DE FALA E FEEDBACK DA IA */}
       {ultimaMensagem && (
-        <div className="pointer-events-auto max-w-[280px] sm:max-w-xs bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-2xl rounded-br-sm shadow-2xl animate-in fade-in slide-in-from-bottom-5">
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-auto max-w-[280px] sm:max-w-xs bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-2xl rounded-br-sm shadow-2xl animate-in fade-in slide-in-from-bottom-5"
+        >
           <div className="flex items-start gap-3">
             <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${aiState === 'speaking' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
               {aiState === 'speaking' ? <Activity size={12} /> : <MessageSquare size={12} />}
             </div>
-            <p className="text-sm text-slate-200 leading-relaxed font-medium">
-              {ultimaMensagem}
-            </p>
+            <p className="text-sm text-slate-200 leading-relaxed font-medium">{ultimaMensagem}</p>
           </div>
         </div>
       )}
 
-      {/* BARRA DE BIOMETRIA VOCAL + RECALIBRAÇÃO */}
+      {/* BIOMETRIA VOCAL + RECALIBRAÇÃO */}
       {isIntercomActive && (
         <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded-full shadow-lg animate-in fade-in duration-200">
           {speakerInfo ? (
-            <span className={`flex items-center gap-1 text-[10px] font-bold tracking-wide ${
-              speakerInfo.locutor === 'Yuri' ? 'text-cyan-300' : 'text-amber-300'
-            }`}>
+            <span className={`flex items-center gap-1 text-[10px] font-bold tracking-wide ${speakerInfo.locutor === 'Yuri' ? 'text-cyan-300' : 'text-amber-300'}`}>
               {speakerInfo.locutor === 'Yuri' ? <Mic size={11} className="text-cyan-400" /> : <Users size={11} className="text-amber-400" />}
-              {speakerInfo.locutor} ({speakerInfo.confianca}%)
+              {speakerInfo.locutor} ({speakerInfo.inconclusivo && !speakerInfo.confianca ? '?' : `${speakerInfo.confianca}%`})
             </span>
           ) : (
             <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400">
@@ -902,9 +1086,9 @@ export default function BarraComandoIA() {
         </div>
       )}
 
-      {/* ORBE PRINCIPAL DO BASTIAN */}
+      {/* ORBE PRINCIPAL */}
       <div className="pointer-events-auto relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 transition-all duration-300">
-        
+
         {isIntercomActive && (
           <div className="absolute inset-0 pointer-events-none">
             <div className={`absolute inset-[-10%] border border-transparent border-t-current border-r-current rounded-full transition-colors duration-500 opacity-50 ${getRingColorClass()} ${aiState === 'processing' ? 'animate-[spin_1s_linear_infinite]' : 'animate-[spin_4s_linear_infinite]'}`}></div>
@@ -912,15 +1096,17 @@ export default function BarraComandoIA() {
           </div>
         )}
 
-        <button 
+        <button
+          type="button"
           onClick={toggleIntercom}
+          aria-pressed={isIntercomActive}
+          aria-label={isIntercomActive ? 'Desativar Bastian' : 'Ativar Bastian'}
           className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center backdrop-blur-md border-2 z-20 cursor-pointer active:scale-95 transition-all duration-300 ${getCoreStyles()}`}
-          title={!isIntercomActive ? "Ativar Bastian" : "Desativar Bastian"}
+          title={!isIntercomActive ? 'Ativar Bastian' : 'Desativar Bastian'}
         >
           <div className={`w-3 h-3 sm:w-4 sm:h-4 rounded-full transition-colors duration-300 ${!isIntercomActive ? 'bg-slate-500' : aiState === 'processing' ? 'bg-amber-400 animate-ping' : aiState === 'speaking' ? 'bg-emerald-400 animate-bounce' : 'bg-cyan-400 animate-pulse shadow-[0_0_15px_rgba(34,211,238,0.8)]'}`}></div>
           {isIntercomActive && <div className="absolute w-1.5 h-1.5 bg-white/90 rounded-full shadow-[0_0_5px_rgba(255,255,255,1)]"></div>}
         </button>
-
       </div>
     </div>
   );
