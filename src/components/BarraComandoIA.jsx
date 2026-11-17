@@ -770,7 +770,8 @@ const executarFerramenta = async (name, args, ctx) => {
       const consulta = String(args.consulta || args.query || '').trim();
       ctx.exibirMensagem(`🌐 Pesquisando na web: "${consulta}"...`);
       // Primeiro o Google Search (Edge Function); se der limite de uso, erro ou resposta sem fontes, cai nas APIs públicas
-      let resultado = await buscarNaWebComGemini(consulta);
+      const profundidade = args.profundidade === 'rapida' ? 'rapida' : 'detalhada';
+      let resultado = await buscarNaWebComGemini(consulta, profundidade);
       if (resultado.status !== 'sucesso') resultado = await buscarNaWeb(consulta);
       if (resultado.fontes_consultadas?.length) ctx.exibirMensagem(`🌐 Fonte: ${resultado.fontes_consultadas[0]}`);
       return resultado;

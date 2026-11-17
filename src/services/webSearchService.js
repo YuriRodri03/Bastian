@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 // A chamada ao Gemini acontece na Edge Function "web-search": a chave de API não existe mais no navegador.
 // Devolve sempre um objeto com "status": 'sucesso' | 'sem_fontes' | 'sem_resultados' | 'limite_de_uso' | 'erro'.
 
-const TIMEOUT_MS = 25000; // um pouco acima do limite de 20 s da função
+const TIMEOUT_MS = 32000; // um pouco acima do limite de 28 s da função
 
 const comTimeout = (promessa, ms) =>
   Promise.race([
@@ -12,13 +12,16 @@ const comTimeout = (promessa, ms) =>
     new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo esgotado na busca.')), ms))
   ]);
 
-export async function buscarNaWebComGemini(consulta) {
+// profundidade: 'detalhada' (padrão: notícias, análises, contexto) ou 'rapida' (dado pontual: cotação, placar, clima)
+export async function buscarNaWebComGemini(consulta, profundidade = 'detalhada') {
   const texto = String(consulta ?? '').trim();
   if (!texto) return { status: 'erro', mensagem: 'Consulta vazia.' };
 
   try {
     const { data, error } = await comTimeout(
-      supabase.functions.invoke('web-search', { body: { consulta: texto } }),
+      supabase.functions.invoke('web-search', {
+        body: { consulta: texto, profundidade: profundidade === 'rapida' ? 'rapida' : 'detalhada' }
+      }),
       TIMEOUT_MS
     );
 
