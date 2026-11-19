@@ -1,10 +1,11 @@
+// src/store/useAgendaStore.js
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { useAuthStore } from './useAuthStore';
+import { resolveUserId, fetchAllRows, isISODate, sameId } from './storeHelpers';
 
-// Mantém a lista sempre ordenada por Data e Horário no estado local
-const sortAgendaItems = (items = []) => {
-  return [...items].sort((a, b) => {
+// Mantém a lista sempre ordenada por data e horário
+const sortAgendaItems = (items = []) =>
+  [...items].sort((a, b) => {
     const dateCompare = (a.date || '').localeCompare(b.date || '');
     if (dateCompare !== 0) return dateCompare;
     if (!a.time && !b.time) return 0;
@@ -12,170 +13,212 @@ const sortAgendaItems = (items = []) => {
     if (!b.time) return -1;
     return a.time.localeCompare(b.time);
   });
+
+// "" vira null (a coluna é do tipo TIME no Postgres)
+const normalizarTime = (t) => (typeof t === 'string' && t.trim() !== '' ? t.trim() : null);
+
+// Monta o registro de um INSERT, validando o essencial
+const montarItem = (item, userId) => {
+  // id, user_id e created_at nunca vêm do cliente
+  const { id, user_id, created_at, ...rest } = item;
+  const title = String(rest.title ?? '').trim();
+  if (!title) throw new Error('O título do compromisso é obrigatório.');
+  if (!isISODate(rest.date)) throw new Error('Data inválida: use o formato AAAA-MM-DD.');
+
+  return {
+    ...rest,
+    title,
+    time: normalizarTime(rest.time),
+    category: rest.category || 'evento',
+    user_id: userId
+  };
 };
 
-export const useAgendaStore = create((set, get) => ({
-  agendaItems: [],
-  projects: [],
-  isLoading: false,
-  error: null,
+// Monta o UPDATE só com os campos enviados.
+// Antes, um update parcial como { title } zerava o horário (time virava null) do compromisso.
+const montarAtualizacao = (u) => {
+  const out = {};
+  if (u.title !== undefined) {
+    const title = String(u.title).trim();
+    if (!title) throw new Error('O título do compromisso não pode ficar vazio.');
+    out.title = title;
+  }
+  if (u.date !== undefined) {
+    if (!isISODate(u.date)) throw new Error('Data inválida: use o formato AAAA-MM-DD.');
+    out.date = u.date;
+  }
+  if (u.time !== undefined) out.time = normalizarTime(u.time);
+  if (u.category !== undefined) out.category = u.category || 'evento';
+  if (u.is_completed !== undefined) out.is_completed = Boolean(u.is_completed);
+  return out;
+};
 
-  // 1. BUSCAR ITENS DA AGENDA
-  fetchAgendaItems: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const { data, error } = await supabase
-        .from('agenda_items')
-        .select('*')
-        .order('date', { ascending: true })
-        .order('time', { ascending: true });
-
-      if (error) throw error;
-      set({ agendaItems: sortAgendaItems(data || []) });
-    } catch (error) {
-      set({ error: error.message });
-      console.error('Erro ao buscar agenda:', error);
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  // 2. ADICIONAR NOVO ITEM (Aceita 1 objeto OU um Array para eventos recorrentes em lote!)
-  addAgendaItem: async (itemInput) => {
-    set({ isLoading: true, error: null });
-
-    let userId = useAuthStore.getState().user?.id;
-    if (!userId) {
-      const { data: authData } = await supabase.auth.getUser();
-      userId = authData?.user?.id;
-    }
-
-    if (!userId) {
-      set({ error: 'Usuário não autenticado', isLoading: false });
-      throw new Error('Usuário não autenticado');
-    }
-
-    const itemsArray = Array.isArray(itemInput) ? itemInput : [itemInput];
-
-    const payloads = itemsArray.map((item) => {
-      const { id, ...rest } = item;
-      return {
-        ...rest,
-        title: (rest.title || '').trim(),
-        time: rest.time && rest.time.trim() !== '' ? rest.time : null, // Evita erro de tipo TIME no Postgres
-        category: rest.category || 'evento',
-        user_id: userId
-      };
+export const useAgendaStore = create((set, get) => {
+  // Contador de operações em andamento: com duas ao mesmo tempo, a primeira a terminar
+  // não desliga o isLoading da outra
+  const begin = () => set((s) => ({ pending: s.pending + 1, isLoading: true, error: null }));
+  const end = () =>
+    set((s) => {
+      const pending = Math.max(0, s.pending - 1);
+      return { pending, isLoading: pending > 0 };
     });
 
-    try {
-      const { data, error } = await supabase
-        .from('agenda_items')
-        .insert(payloads)
-        .select();
+  return {
+    agendaItems: [],
+    projects: [], // mantido por compatibilidade (não usado nesta tela)
+    isLoading: false,
+    pending: 0,
+    error: null,
 
-      if (error) throw error;
+    // 1. BUSCAR ITENS DA AGENDA (todas as páginas, filtrando pelo usuário)
+    fetchAgendaItems: async () => {
+      begin();
+      try {
+        const userId = await resolveUserId();
+        if (!userId) return;
 
-      const inserted = data || [];
-      set((state) => ({
-        agendaItems: sortAgendaItems([...state.agendaItems, ...inserted])
-      }));
+        const rows = await fetchAllRows('agenda_items', (q) =>
+          q.eq('user_id', userId)
+            .order('date', { ascending: true })
+            .order('time', { ascending: true })
+            .order('id', { ascending: true })
+        );
+        set({ agendaItems: sortAgendaItems(rows) });
+      } catch (error) {
+        set({ error: error.message });
+        console.error('Erro ao buscar agenda:', error);
+      } finally {
+        end();
+      }
+    },
 
-      return Array.isArray(itemInput) ? inserted : inserted[0];
-    } catch (error) {
-      set({ error: error.message });
-      console.error('[Supabase] Erro Crítico ao adicionar item na Agenda:', error);
-      throw error; // Repassa o erro para o Bastian / BarraComandoIA
-    } finally {
-      set({ isLoading: false });
-    }
-  },
+    // 2. ADICIONAR (1 objeto OU um Array, para eventos recorrentes em lote)
+    addAgendaItem: async (itemInput) => {
+      const lista = Array.isArray(itemInput) ? itemInput : [itemInput];
+      if (lista.length === 0) return []; // insert([]) daria erro
 
-  // 3. ATUALIZAR ITEM EXISTENTE (Editar)
-  updateAgendaItem: async (id, updatedItem) => {
-    set({ isLoading: true, error: null });
+      begin();
+      try {
+        const userId = await resolveUserId();
+        if (!userId) throw new Error('Usuário não autenticado');
 
-    const payload = {
-      ...updatedItem,
-      title: updatedItem.title ? updatedItem.title.trim() : undefined,
-      time: updatedItem.time && updatedItem.time.trim() !== '' ? updatedItem.time : null
-    };
+        const payloads = lista.map((item) => montarItem(item, userId));
+        const { data, error } = await supabase.from('agenda_items').insert(payloads).select();
+        if (error) throw error;
 
-    try {
-      const { data, error } = await supabase
-        .from('agenda_items')
-        .update(payload)
-        .eq('id', id)
-        .select()
-        .single();
+        const inserted = data || [];
+        set((state) => ({ agendaItems: sortAgendaItems([...state.agendaItems, ...inserted]) }));
 
-      if (error) throw error;
+        return Array.isArray(itemInput) ? inserted : inserted[0];
+      } catch (error) {
+        set({ error: error.message });
+        console.error('[Supabase] Erro ao adicionar item na Agenda:', error);
+        throw error; // repassa para a tela / BarraComandoIA
+      } finally {
+        end();
+      }
+    },
 
-      set((state) => ({
-        agendaItems: sortAgendaItems(
-          state.agendaItems.map((item) => (item.id === id ? { ...item, ...data } : item))
-        )
-      }));
+    // 3. ATUALIZAR (só os campos enviados)
+    updateAgendaItem: async (id, updatedItem) => {
+      begin();
+      try {
+        const campos = montarAtualizacao(updatedItem || {});
+        if (Object.keys(campos).length === 0) {
+          return get().agendaItems.find((i) => sameId(i.id, id)) ?? null;
+        }
 
-      return data;
-    } catch (error) {
-      set({ error: error.message });
-      console.error('Erro ao atualizar item:', error);
-      throw error;
-    } finally {
-      set({ isLoading: false });
-    }
-  },
+        const { data, error } = await supabase
+          .from('agenda_items')
+          .update(campos)
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) throw error;
 
-  // 4. DELETAR ITEM DA AGENDA (Suporta 1 ID ou um Array de IDs)
-  deleteAgendaItem: async (idOrIds) => {
-    set({ isLoading: true, error: null });
-    const idsArray = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+        set((state) => ({
+          agendaItems: sortAgendaItems(
+            state.agendaItems.map((item) => (sameId(item.id, id) ? { ...item, ...data } : item))
+          )
+        }));
+        return data;
+      } catch (error) {
+        set({ error: error.message });
+        console.error('Erro ao atualizar item:', error);
+        throw error;
+      } finally {
+        end();
+      }
+    },
 
-    try {
-      const { error } = await supabase
-        .from('agenda_items')
-        .delete()
-        .in('id', idsArray);
-
-      if (error) throw error;
-
-      set((state) => ({
-        agendaItems: state.agendaItems.filter((item) => !idsArray.includes(item.id))
-      }));
-    } catch (error) {
-      set({ error: error.message });
-      console.error('Erro ao deletar item:', error);
-      throw error;
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  // 5. MARCAR COMO CONCLUÍDO / PENDENTE
-  toggleItemCompletion: async (id, currentStatus) => {
-    const targetItem = get().agendaItems.find((i) => i.id === id);
-    const resolvedStatus = currentStatus !== undefined ? currentStatus : Boolean(targetItem?.is_completed);
-    const nextStatus = !resolvedStatus;
-
-    try {
-      const { data, error } = await supabase
-        .from('agenda_items')
-        .update({ is_completed: nextStatus })
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) throw error;
+    // 4. DELETAR (1 id ou Array). Otimista, com reversão se falhar.
+    deleteAgendaItem: async (idOrIds) => {
+      const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+      const idsStr = ids.map(String);
+      const removidos = get().agendaItems.filter((i) => idsStr.includes(String(i.id)));
 
       set((state) => ({
-        agendaItems: state.agendaItems.map((item) =>
-          item.id === id ? { ...item, ...(data || { is_completed: nextStatus }) } : item
-        )
+        agendaItems: state.agendaItems.filter((i) => !idsStr.includes(String(i.id))),
+        error: null
       }));
-    } catch (error) {
-      console.error('Erro ao atualizar status:', error);
-      throw error;
-    }
-  }
-}));
+
+      try {
+        // .select('id') devolve o que foi apagado: se vier vazio, nada foi removido (id errado ou sem permissão)
+        const { data, error } = await supabase.from('agenda_items').delete().in('id', ids).select('id');
+        if (error) throw error;
+        if (!data || data.length === 0) throw new Error('Compromisso não encontrado.');
+      } catch (error) {
+        console.error('Erro ao deletar item (revertendo):', error);
+        set((state) => ({
+          // devolve só o que foi tirado, sem duplicar nem desfazer outras alterações
+          agendaItems: sortAgendaItems([
+            ...state.agendaItems,
+            ...removidos.filter((r) => !state.agendaItems.some((i) => sameId(i.id, r.id)))
+          ]),
+          error: error.message
+        }));
+        throw error;
+      }
+    },
+
+    // 5. CONCLUIR / REABRIR. currentStatus é o estado ATUAL (quem chama passa o que está vendo);
+    // o novo valor é o inverso. Sem ele, usa o valor guardado. Otimista, com reversão.
+    toggleItemCompletion: async (id, currentStatus) => {
+      const alvo = get().agendaItems.find((i) => sameId(i.id, id));
+      if (!alvo) throw new Error('Compromisso não encontrado.');
+
+      const anterior = Boolean(alvo.is_completed);
+      const atual = currentStatus !== undefined ? Boolean(currentStatus) : anterior;
+      const proximo = !atual;
+
+      set((state) => ({
+        agendaItems: state.agendaItems.map((i) => (sameId(i.id, alvo.id) ? { ...i, is_completed: proximo } : i)),
+        error: null
+      }));
+
+      try {
+        const { data, error } = await supabase
+          .from('agenda_items')
+          .update({ is_completed: proximo })
+          .eq('id', alvo.id)
+          .select()
+          .single();
+        if (error) throw error;
+
+        set((state) => ({
+          agendaItems: state.agendaItems.map((i) => (sameId(i.id, alvo.id) ? { ...i, ...data } : i))
+        }));
+      } catch (error) {
+        console.error('Erro ao atualizar status (revertendo):', error);
+        set((state) => ({
+          agendaItems: state.agendaItems.map((i) => (sameId(i.id, alvo.id) ? { ...i, is_completed: anterior } : i)),
+          error: error.message
+        }));
+        throw error;
+      }
+    },
+
+    // 6. Limpa tudo (chame no logout: o store é global e guardaria os dados do usuário anterior)
+    reset: () => set({ agendaItems: [], isLoading: false, pending: 0, error: null })
+  };
+});

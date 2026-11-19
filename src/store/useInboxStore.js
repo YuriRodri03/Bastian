@@ -1,58 +1,40 @@
+// src/store/useInboxStore.js
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { useAuthStore } from './useAuthStore';
+import { resolveUserId, fetchAllRows, isISODate, getLocalTodayISO, sameId } from './storeHelpers';
 
-// Garante a data local correta (evita o bug do UTC após as 21h no Brasil)
-const getLocalTodayISO = () => {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-// Mantém tarefas pendentes no topo e concluídas na base (ordenadas pelas mais recentes)
-const sortInboxTasks = (tasks = []) => {
-  return [...tasks].sort((a, b) => {
-    if (Boolean(a.completed) !== Boolean(b.completed)) {
-      return a.completed ? 1 : -1;
-    }
+// Pendentes no topo, concluídas na base; dentro de cada grupo, as mais recentes primeiro
+const sortInboxTasks = (tasks = []) =>
+  [...tasks].sort((a, b) => {
+    if (Boolean(a.completed) !== Boolean(b.completed)) return a.completed ? 1 : -1;
     return new Date(b.created_at || 0) - new Date(a.created_at || 0);
   });
-};
 
-// Helper rápido para recuperar o ID do usuário sem requisição extra se já estiver no AuthStore
-const resolveUserId = async () => {
-  const cachedId = useAuthStore.getState()?.user?.id;
-  if (cachedId) return cachedId;
-  const { data } = await supabase.auth.getUser();
-  return data?.user?.id || null;
-};
+// Devolve ao estado só as tarefas que saíram, sem duplicar e sem desfazer outras alterações
+// (restaurar a lista inteira, como antes, apagava mudanças feitas enquanto a requisição estava pendente)
+const restaurarTarefas = (state, removidas) => [
+  ...state.inboxTasks,
+  ...removidas.filter((r) => !state.inboxTasks.some((t) => sameId(t.id, r.id)))
+];
 
 export const useInboxStore = create((set, get) => ({
   inboxTasks: [],
   isLoading: false,
   error: null,
 
-  // 1. Buscar tarefas do usuário
+  // 1. Buscar tarefas do usuário (todas as páginas)
   fetchInboxTasks: async () => {
     set({ isLoading: true, error: null });
     try {
       const userId = await resolveUserId();
-      if (!userId) {
-        set({ isLoading: false });
-        return;
-      }
+      if (!userId) return;
 
-      const { data, error } = await supabase
-        .from('inbox_tasks')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      set({ inboxTasks: sortInboxTasks(data || []) });
+      const rows = await fetchAllRows('inbox_tasks', (q) =>
+        q.eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+      );
+      set({ inboxTasks: sortInboxTasks(rows) });
     } catch (error) {
       console.error('[Supabase] Erro ao buscar inbox_tasks:', error);
       set({ error: error.message });
@@ -61,168 +43,166 @@ export const useInboxStore = create((set, get) => ({
     }
   },
 
-  // 2. Adicionar tarefa (Aceita (title, dateString) OU um Array de tarefas em lote)
+  // 2. Adicionar (title + data OU um Array de tarefas em lote)
   addInboxTask: async (titleOrArray, dateString = null) => {
     set({ error: null });
 
-    const userId = await resolveUserId();
-    if (!userId) {
-      const err = new Error('Usuário não autenticado');
-      set({ error: err.message });
-      throw err;
-    }
+    try {
+      const userId = await resolveUserId();
+      if (!userId) throw new Error('Usuário não autenticado');
 
-    const defaultDate = dateString || getLocalTodayISO();
-    let payloads = [];
+      const defaultDate = dateString || getLocalTodayISO();
+      const lista = Array.isArray(titleOrArray) ? titleOrArray : [titleOrArray];
 
-    if (Array.isArray(titleOrArray)) {
-      payloads = titleOrArray
+      const payloads = lista
         .map((item) => {
-          const title = typeof item === 'string' ? item.trim() : (item.title || '').trim();
-          const date = (typeof item === 'object' && item.date) ? item.date : defaultDate;
-          return title ? { title, date, completed: false, user_id: userId } : null;
+          const title = (typeof item === 'string' ? item : item?.title || '').trim();
+          const date = (typeof item === 'object' && item?.date) || defaultDate;
+          if (!title) return null;
+          if (!isISODate(date)) throw new Error('Data inválida: use o formato AAAA-MM-DD.');
+          return { title, date, completed: false, user_id: userId };
         })
         .filter(Boolean);
-    } else {
-      const cleanTitle = (titleOrArray || '').trim();
-      if (!cleanTitle) return;
-      payloads = [{ title: cleanTitle, date: defaultDate, completed: false, user_id: userId }];
-    }
 
-    if (payloads.length === 0) return;
+      if (payloads.length === 0) return Array.isArray(titleOrArray) ? [] : undefined;
 
-    try {
-      const { data, error } = await supabase
-        .from('inbox_tasks')
-        .insert(payloads)
-        .select();
-
+      const { data, error } = await supabase.from('inbox_tasks').insert(payloads).select();
       if (error) throw error;
 
       const inserted = data || [];
-      set((state) => ({
-        inboxTasks: sortInboxTasks([...inserted, ...state.inboxTasks])
-      }));
+      set((state) => ({ inboxTasks: sortInboxTasks([...inserted, ...state.inboxTasks]) }));
 
       return Array.isArray(titleOrArray) ? inserted : inserted[0];
     } catch (error) {
       console.error('[Supabase] Erro ao adicionar tarefa no Inbox:', error);
       set({ error: error.message });
-      throw error; // Repassa falha para o Bastian / BarraComandoIA
+      throw error; // repassa para a tela / BarraComandoIA
     }
   },
 
-  // 3. Alternar status Concluído/Pendente (Otimista + Rollback em caso de falha)
+  // 3. Alternar concluída/pendente. currentCompleted é o estado ATUAL; o novo é o inverso.
+  // Otimista; se falhar, reverte só esta tarefa.
   toggleInboxTask: async (taskId, currentCompleted) => {
-    const previousTasks = get().inboxTasks;
-    const targetTask = previousTasks.find((t) => t.id === taskId);
-    if (!targetTask) return;
+    const alvo = get().inboxTasks.find((t) => sameId(t.id, taskId));
+    if (!alvo) throw new Error('Tarefa não encontrada.');
 
-    const newStatus = currentCompleted !== undefined ? !currentCompleted : !targetTask.completed;
+    const anterior = Boolean(alvo.completed);
+    const novoStatus = currentCompleted !== undefined ? !currentCompleted : !anterior;
 
-    // Atualização otimista imediata + reordenação (concluídas descem)
     set((state) => ({
       inboxTasks: sortInboxTasks(
-        state.inboxTasks.map((task) =>
-          task.id === taskId ? { ...task, completed: newStatus } : task
-        )
-      )
+        state.inboxTasks.map((t) => (sameId(t.id, alvo.id) ? { ...t, completed: novoStatus } : t))
+      ),
+      error: null
     }));
 
     try {
-      const { error } = await supabase
-        .from('inbox_tasks')
-        .update({ completed: newStatus })
-        .eq('id', taskId);
-
+      const { error } = await supabase.from('inbox_tasks').update({ completed: novoStatus }).eq('id', alvo.id);
       if (error) throw error;
     } catch (error) {
       console.error('[Supabase] Erro ao alternar status da tarefa (revertendo):', error);
-      // Rollback para o estado anterior
-      set({ inboxTasks: previousTasks, error: error.message });
+      set((state) => ({
+        inboxTasks: sortInboxTasks(
+          state.inboxTasks.map((t) => (sameId(t.id, alvo.id) ? { ...t, completed: anterior } : t))
+        ),
+        error: error.message
+      }));
       throw error;
     }
   },
 
-  // 4. Editar título ou data de uma tarefa existente
-  updateInboxTask: async (taskId, updates) => {
-    const previousTasks = get().inboxTasks;
+  // 4. Editar título e/ou data (só os campos enviados). Otimista; reverte só esta tarefa.
+  updateInboxTask: async (taskId, updates = {}) => {
+    const original = get().inboxTasks.find((t) => sameId(t.id, taskId));
+    if (!original) throw new Error('Tarefa não encontrada.');
 
-    const cleanUpdates = { ...updates };
-    if (cleanUpdates.title !== undefined) {
-      cleanUpdates.title = cleanUpdates.title.trim();
+    const campos = {};
+    if (updates.title !== undefined) {
+      const title = String(updates.title).trim();
+      if (!title) throw new Error('O título da tarefa não pode ficar vazio.');
+      campos.title = title;
     }
+    if (updates.date !== undefined) {
+      if (!isISODate(updates.date)) throw new Error('Data inválida: use o formato AAAA-MM-DD.');
+      campos.date = updates.date;
+    }
+    if (updates.completed !== undefined) campos.completed = Boolean(updates.completed);
+    if (Object.keys(campos).length === 0) return original;
 
     set((state) => ({
-      inboxTasks: sortInboxTasks(
-        state.inboxTasks.map((t) => (t.id === taskId ? { ...t, ...cleanUpdates } : t))
-      )
+      inboxTasks: sortInboxTasks(state.inboxTasks.map((t) => (sameId(t.id, original.id) ? { ...t, ...campos } : t))),
+      error: null
     }));
 
     try {
       const { data, error } = await supabase
         .from('inbox_tasks')
-        .update(cleanUpdates)
-        .eq('id', taskId)
+        .update(campos)
+        .eq('id', original.id)
         .select()
         .single();
-
       if (error) throw error;
+
+      set((state) => ({
+        inboxTasks: sortInboxTasks(state.inboxTasks.map((t) => (sameId(t.id, original.id) ? { ...t, ...data } : t)))
+      }));
       return data;
     } catch (error) {
-      console.error('[Supabase] Erro ao atualizar tarefa do Inbox:', error);
-      set({ inboxTasks: previousTasks, error: error.message });
+      console.error('[Supabase] Erro ao atualizar tarefa do Inbox (revertendo):', error);
+      set((state) => ({
+        inboxTasks: sortInboxTasks(state.inboxTasks.map((t) => (sameId(t.id, original.id) ? original : t))),
+        error: error.message
+      }));
       throw error;
     }
   },
 
-  // 5. Excluir tarefa (Otimista + Rollback + Suporte a múltiplos IDs)
+  // 5. Excluir (1 id ou Array). Otimista; reverte se falhar ou se nada foi apagado.
   deleteInboxTask: async (idOrIds) => {
-    const previousTasks = get().inboxTasks;
-    const idsArray = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    const idsStr = ids.map(String);
+    const removidas = get().inboxTasks.filter((t) => idsStr.includes(String(t.id)));
 
     set((state) => ({
-      inboxTasks: state.inboxTasks.filter((t) => !idsArray.includes(t.id))
+      inboxTasks: state.inboxTasks.filter((t) => !idsStr.includes(String(t.id))),
+      error: null
     }));
 
     try {
-      const { error } = await supabase
-        .from('inbox_tasks')
-        .delete()
-        .in('id', idsArray);
-
+      // .select('id') mostra o que foi apagado de fato: vazio = id errado ou sem permissão
+      const { data, error } = await supabase.from('inbox_tasks').delete().in('id', ids).select('id');
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error('Tarefa não encontrada.');
     } catch (error) {
       console.error('[Supabase] Erro ao excluir tarefa do Inbox (revertendo):', error);
-      set({ inboxTasks: previousTasks, error: error.message });
+      set((state) => ({ inboxTasks: sortInboxTasks(restaurarTarefas(state, removidas)), error: error.message }));
       throw error;
     }
   },
 
-  // 6. Limpar todas as tarefas concluídas de uma data (ou geral)
+  // 6. Limpar concluídas (de uma data ou todas)
   clearCompletedTasks: async (dateString = null) => {
-    const previousTasks = get().inboxTasks;
-    const completedIds = previousTasks
-      .filter((t) => t.completed && (!dateString || t.date === dateString))
-      .map((t) => t.id);
+    const removidas = get().inboxTasks.filter((t) => t.completed && (!dateString || t.date === dateString));
+    if (removidas.length === 0) return;
 
-    if (completedIds.length === 0) return;
+    const ids = removidas.map((t) => t.id);
+    const idsStr = ids.map(String);
 
     set((state) => ({
-      inboxTasks: state.inboxTasks.filter((t) => !completedIds.includes(t.id))
+      inboxTasks: state.inboxTasks.filter((t) => !idsStr.includes(String(t.id))),
+      error: null
     }));
 
     try {
-      const { error } = await supabase
-        .from('inbox_tasks')
-        .delete()
-        .in('id', completedIds);
-
+      const { error } = await supabase.from('inbox_tasks').delete().in('id', ids);
       if (error) throw error;
     } catch (error) {
-      console.error('[Supabase] Erro ao limpar tarefas concluídas:', error);
-      set({ inboxTasks: previousTasks, error: error.message });
+      console.error('[Supabase] Erro ao limpar tarefas concluídas (revertendo):', error);
+      set((state) => ({ inboxTasks: sortInboxTasks(restaurarTarefas(state, removidas)), error: error.message }));
       throw error;
     }
-  }
-}));
+  },
+
+  // 7. Limpa tudo (chame no logout)
+  reset: () => set({ inboxTasks: [], isLoading: false, error: null })
+}));a
