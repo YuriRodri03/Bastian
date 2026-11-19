@@ -205,4 +205,4 @@ export const useInboxStore = create((set, get) => ({
 
   // 7. Limpa tudo (chame no logout)
   reset: () => set({ inboxTasks: [], isLoading: false, error: null })
-}));a
+}));
