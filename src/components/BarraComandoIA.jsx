@@ -438,7 +438,7 @@ const gerenciarFichaTreino = (args, { exibirMensagem }) => {
       return { status: 'sucesso', ficha };
     }
     case 'deletar': {
-      fitness.deleteFichaTreino(titulo);
+      if (!fitness.deleteFichaTreino(titulo)) throw new Error(`Ficha "${titulo}" não encontrada.`);
       exibirMensagem(`🗑️ Ficha removida: ${titulo}`);
       return { status: 'sucesso', ficha_deletada: titulo };
     }
@@ -636,7 +636,7 @@ const alterarDado = async (args, { exibirMensagem }) => {
     let removido = String(rawId);
     switch (grupo) {
       case 'ficha':
-        useFitnessStore.getState().deleteFichaTreino(rawId);
+        if (!useFitnessStore.getState().deleteFichaTreino(rawId)) throw new Error(`Ficha "${rawId}" não encontrada.`);
         break;
       case 'financas': {
         const t = achar();
